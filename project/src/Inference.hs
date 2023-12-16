@@ -2,13 +2,48 @@
 {-# LANGUAGE RecordWildCards #-}
 module Inference( run ) where
 
-import Numeric.LinearAlgebra
 
-import System.Random
-import Text.Printf (printf)
-import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
+import System.Random
+import Control.Monad
+import Numeric.LinearAlgebra
+import Data.Array
+import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
+
+data TransformerWeighting = TransformerWeighting
+    { tokenEmbeddingTable :: Array Int Float
+    , rmsAttWeight :: Array Int Float
+    , wq :: Array Int Float
+    , wk :: Array Int Float
+    , wv :: Array Int Float
+    , wo :: Array Int Float
+    , rmsFfnWeight :: Array Int Float
+    , w1 :: Array Int Float
+    , w3 :: Array Int Float
+    , w2 :: Array Int Float
+    , rmsFinalWeight :: Array Int Float
+    , freqCisReal :: Array Int (Array Int Float)
+    , freqCisImag :: Array Int (Array Int Float)
+    } deriving (Show)
+
+data Network = Network
+    { dim :: Int
+    , hiddenDim :: Int
+    , nLayers :: Int
+    , numAttentionHeads :: Int
+    , numKeyValueHeads :: Int
+    , vocabSize :: Int
+    , seqLen :: Int
+    , weighting :: Maybe TransformerWeighting
+    , headDimension :: Int
+    } deriving (Show)
+
+data RunState = RunState
+    { scores :: Array Int (Array Int Float) -- scores/attention values (n_heads, seq_len)
+    , keyCache :: Array Int (Array Int (Array Int Float)) -- (layer, seq_len, dim)
+    , valueCache :: Array Int (Array Int (Array Int Float)) -- (layer, seq_len, dim)
+    } deriving (Show)
 
 
 rmsNorm :: Vector Double -> Vector Double -> Vector Double

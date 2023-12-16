@@ -40,6 +40,7 @@ library:
   dependencies:
   - hmatrix
   - bytestring
+  - array
 
 executables:
   cli-app:
@@ -55,6 +56,7 @@ executables:
     - hmatrix
     - bytestring
     - binary
+    - array
 
 tests:
   project-test:
