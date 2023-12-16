@@ -6,6 +6,9 @@ import System.IO
 import Data.Binary.Get (Get, runGet, getLazyByteString)
 import qualified Data.ByteString.Lazy as BSL
 import Inference (run)
+import System.Directory
+import System.FilePath
+import Text.Printf (printf)
 
 
 data Options = Options
@@ -32,6 +35,8 @@ main = do
     Options {..} <- execParser $ info (optionsParser <**> helper) fullDesc
     modelFileHandle <- flip openFile ReadMode =<< return modelFile
     tokenizerFileHandle <- flip openFile ReadMode =<< return tokenizerFile
+    tokenizerAbsolutePath <- canonicalizePath tokenizerFile
+    printf "loading tokenizer %s\n" tokenizerAbsolutePath
     modelFileContent <- BSL.hGetContents modelFileHandle
     tokenizerFileContent <- BSL.hGetContents tokenizerFileHandle
     Inference.run modelFileContent tokenizerFileContent temperature steps prompt seed

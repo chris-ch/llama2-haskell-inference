@@ -41,6 +41,10 @@ library:
   - hmatrix
   - bytestring
   - array
+  - binary
+  - text
+  - directory
+  - filepath
 
 executables:
   cli-app:
@@ -57,6 +61,9 @@ executables:
     - bytestring
     - binary
     - array
+    - text
+    - directory
+    - filepath
 
 tests:
   project-test:
