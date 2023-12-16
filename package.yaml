@@ -47,6 +47,8 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    dependencies:
+    - project
 
 tests:
   project-test:
