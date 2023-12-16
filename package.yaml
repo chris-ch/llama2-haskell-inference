@@ -37,18 +37,21 @@ ghc-options:
 
 library:
   source-dirs: project/src
-  dependencies: hmatrix
+  dependencies:
+  - hmatrix
 
 executables:
   cli-app:
     main:                Main.hs
-    source-dirs:         project/cli-app
+    source-dirs:
+    - project/cli-app
+    - project/src
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - project
+    - hmatrix
 
 tests:
   project-test:
