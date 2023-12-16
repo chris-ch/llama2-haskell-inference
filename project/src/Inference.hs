@@ -89,38 +89,31 @@ loadNetwork networkConfigFile = return Network
               <$> getInt32le <*> getInt32le <*> getInt32le <*> getInt32le <*> getInt32le
               <*> getInt32le <*> getInt32le) networkConfigFile
 
-readToken :: BSL.ByteString -> (Float, String)
-readToken file = (score, str)
+parseTokens :: BSL.ByteString -> Int -> ([String], [Float])
+parseTokens file size = (vocab, vocabScores)
   where
-    score = BG.runGet BG.getFloatle (BSL.take 4 file)
-    length = BG.runGet BG.getInt32le (BSL.take 4 file)
-    bstr = TE.decodeUtf8 $ BSL.toStrict $ BSL.take (fromIntegral length) file
-    str = unpack bstr
+    readToken :: BG.Get (Float, String)
+    readToken = do
+      score <- BG.getFloatle
+      length <- BG.getInt32le
+      bstr <- TE.decodeUtf8 . BSL.toStrict <$> BG.getLazyByteString (fromIntegral length)
+      return (score, unpack bstr)
 
-parseTokens :: BSL.ByteString -> Int -> Int -> ([String], [Float], Int)
-parseTokens file maxTokenLength size = (vocab, vocabScores, maxTokenLength)
-  where
-    readTemp2 :: BG.Get (Float, String)
-    readTemp2 = readToken <$> pure file
-    scoresAndStrings = BG.runGet (replicateM size readTemp2) file
+    scoresAndStrings :: BG.Get [(Float, String)]
+    scoresAndStrings = replicateM size readToken
 
-    vocabScores = fst <$> scoresAndStrings
-    vocab = snd <$> scoresAndStrings
-  
-tokenizerInit :: BSL.ByteString -> Int -> ([String], [Float], Int)
-tokenizerInit file size = parseTokens file maxTokenLength size
-  where 
-        extractMaxTokenLength :: BSL.ByteString -> Int
-        extractMaxTokenLength file = fromIntegral $ runGet getWord32le (BSL.take 4 file)
+    vocabScores = fst <$> BG.runGet scoresAndStrings file
+    vocab = snd <$> BG.runGet scoresAndStrings file
 
-        maxTokenLength = extractMaxTokenLength file
+tokenizerInit :: BSL.ByteString -> Int -> ([String], [Float])
+tokenizerInit file size = parseTokens (BSL.drop 4 file) size
 
 
 run :: BSL.ByteString -> BSL.ByteString -> Double -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let seedValue = fromMaybe 0 seed -- Provide a default value if seed is Nothing
   network <- loadNetwork modelFileContent
-  let (vocab, vocabScores, maxTokenLength) = tokenizerInit tokenizerFileContent (vocabSize network)
+  let (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
 
   putStrLn $ "created network: " ++ show network
   print vocab
