@@ -1,14 +1,15 @@
 {-# LANGUAGE FlexibleContexts #-}
-module Lib
-    ( entryPoint
-    ) where
+{-# LANGUAGE RecordWildCards #-}
+module Inference( run ) where
 
 import Numeric.LinearAlgebra
 
 import System.Random
-import Text.Printf
+import Text.Printf (printf)
 import Control.Monad
-import qualified Data.List as L (intercalate)
+import qualified Data.ByteString.Lazy as BSL
+import Data.Maybe (fromMaybe)
+
 
 rmsNorm :: Vector Double -> Vector Double -> Vector Double
 rmsNorm x weight =
@@ -22,3 +23,8 @@ entryPoint count = do
       w = vector [0.1, 0.2, 0.3]
       result = rmsNorm x w
   print result
+
+run :: BSL.ByteString -> BSL.ByteString -> Double -> Int -> Maybe String -> Maybe Int -> IO ()
+run modelFileContent tokenizerFileContent temperature steps prompt seed = do
+  let seedValue = fromMaybe 0 seed -- Provide a default value if seed is Nothing
+  printf "%d %f" seedValue temperature

@@ -1,15 +1,39 @@
+{-# LANGUAGE RecordWildCards #-}
 module Main (main) where
 
 import Options.Applicative
-import Lib
+import System.IO
+import Data.Binary.Get (Get, runGet, getLazyByteString)
+import qualified Data.ByteString.Lazy as BSL
+import Inference (run)
 
-parsingArgument :: Parser Int
-parsingArgument = argument auto (metavar "<number of iterations>")
+
+data Options = Options
+    { seed :: Maybe Int
+    , tokenizerFile :: FilePath
+    , modelFile :: FilePath
+    , temperature :: Double
+    , steps :: Int
+    , prompt :: Maybe String
+    }
+
+-- Parser for command-line options
+optionsParser :: Parser Options
+optionsParser = Options
+    <$> optional (option auto (long "seed" <> help "Seed for debugging"))
+    <*> strOption (long "tokenizer-file" <> value "./data/tokenizer.bin" <> help "Tokenizer binary file")
+    <*> strOption (long "model-file" <> value "./data/stories15M.bin" <> metavar "MODEL_FILE" <> help "Model binary file")
+    <*> option auto (long "temperature" <> value 0.0 <> metavar "TEMPERATURE" <> help "Temperature")
+    <*> option auto (long "steps" <> value 256 <> metavar "STEPS" <> help "Number of steps")
+    <*> optional (strArgument (metavar "PROMPT" <> help "Initial prompt"))
 
 main :: IO ()
-main = entryPoint =<< execParser opts
-    where
-        opts = info (parsingArgument <**> helper)
-            ( fullDesc
-            <> progDesc "This application finds the solution of the children's farmer problem"
-            <> header "Sample CLI application written in Haskell" )
+main = do
+    Options {..} <- execParser $ info (optionsParser <**> helper) fullDesc
+    modelFileHandle <- flip openFile ReadMode =<< return modelFile
+    tokenizerFileHandle <- flip openFile ReadMode =<< return tokenizerFile
+    modelFileContent <- BSL.hGetContents modelFileHandle
+    tokenizerFileContent <- BSL.hGetContents tokenizerFileHandle
+    Inference.run modelFileContent tokenizerFileContent temperature steps prompt seed
+    hClose modelFileHandle
+    hClose tokenizerFileHandle

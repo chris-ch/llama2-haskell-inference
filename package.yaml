@@ -39,6 +39,7 @@ library:
   source-dirs: project/src
   dependencies:
   - hmatrix
+  - bytestring
 
 executables:
   cli-app:
@@ -52,6 +53,8 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - hmatrix
+    - bytestring
+    - binary
 
 tests:
   project-test:
