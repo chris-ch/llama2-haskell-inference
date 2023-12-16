@@ -1,15 +1,6 @@
 {
-	"image": "mcr.microsoft.com/devcontainers/base:debian",
+	"image": "docker.io/haskell:9.8.1",
 	"features": {
-		"ghcr.io/devcontainers-contrib/features/haskell:2": {
-			"ghcVersion": "9.8.1",
-			"globalPackages": "hlint hspec pandoc",
-			"installHLS": true,
-			"downgradeGhcToSupportHls": true,
-			"installStack": true,
-			"installStackGHCupHook": true,
-			"adjustBash": true
-		},
 		"ghcr.io/rocker-org/devcontainer-features/apt-packages:1": {
 			"packages": "libblas3,liblapack3,liblapack-dev,libblas-dev"
 		}
