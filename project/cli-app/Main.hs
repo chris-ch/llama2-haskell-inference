@@ -13,4 +13,3 @@ main = entryPoint =<< execParser opts
             ( fullDesc
             <> progDesc "This application finds the solution of the children's farmer problem"
             <> header "Sample CLI application written in Haskell" )
-
