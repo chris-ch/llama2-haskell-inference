@@ -1,37 +1,24 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Lib
     ( entryPoint
     ) where
 
+import Numeric.LinearAlgebra
+
 import System.Random
 import Text.Printf
 import Control.Monad
+import qualified Data.List as L (intercalate)
 
-choose :: (a, a) -> IO a
-choose (x, y) = do
-  r <- randomIO :: IO Bool
-  if r then return x else return y
+rmsNorm :: Vector Double -> Vector Double -> Vector Double
+rmsNorm x weight =
+  let ss = (sumElements (x^2) / fromIntegral (size x)) + 1e-5
+      normalized = cmap (* (1.0 / sqrt ss)) x
+  in weight * normalized
 
-data Gender = Boy | Girl deriving (Eq, Ord, Enum, Show)
-
-children :: IO (Gender, Gender)
-children = do
-    child1 <- choose (Boy, Girl)
-    child2 <- choose (Boy, Girl)
-    return (child1, child2)
-
-rule :: (Int, Int) -> IO (Gender, Gender) -> IO (Int, Int)
-rule (countHits, countAll) genders = do
-  (child1, child2) <- genders
-  return $ case (child1, child2) of
-      (Boy, Boy) ->  (countHits, countAll + 1)
-      (Boy, Girl) ->  (countHits + 1, countAll + 1)
-      (Girl, Boy) ->  (countHits + 1, countAll + 1)
-      (Girl, Girl) ->  (countHits, countAll)
-
-stats :: Int -> IO (Int, Int)
-stats count = foldM rule (0, 0) [children | _ <- [1..count]]
-
-entryPoint :: IO ()
-entryPoint = do
-  value <- stats 10000
-  printf "%d %d --> %.2f\n" (fst value) (snd value) (fromIntegral (fst value) / fromIntegral (snd value) :: Float)
+entryPoint :: Int -> IO ()
+entryPoint count = do
+  let x = vector [1.0, 2.0, 3.0]
+      w = vector [0.1, 0.2, 0.3]
+      result = rmsNorm x w
+  print result
