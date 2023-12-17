@@ -19,7 +19,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Binary.Get (runGet, getInt32le, getWord32le, getFloatle)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
-import Data.Text (Text, pack, unpack, isAscii)
+import Data.Text (Text, isAscii)
 import qualified Data.List as DL
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Word (Word32)
@@ -150,17 +150,21 @@ processTokens tokens vocab vocabScores = process tokens
     mergePair idx id tokens' =
       take idx tokens' ++ [id] ++ drop (idx + 2) tokens'
 
---bpeEncode :: T.Text -> [T.Text] -> V.Vector Float -> [Int]
---bpeEncode prompt vocab vocabScores = processTokens tokens vocab vocabScores
---  where
---    tokens = map (\char -> strLookup (T.unpack char) vocab) (T.unpack prompt)
+bpeEncode :: T.Text -> [T.Text] -> [Float] -> [Int]
+bpeEncode prompt vocab vocabScores =
+  let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
+  in processTokens tokens vocab vocabScores
 
 run :: BSL.ByteString -> BSL.ByteString -> Double -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let seedValue = fromMaybe 0 seed -- Provide a default value if seed is Nothing
   network <- loadNetwork modelFileContent
-  let (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
+  let 
+    (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
+    state = makeInitState network
+    promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
 
   putStrLn $ "created network: " ++ show network
-  mapM_ (putStr . unpack) vocab
+  print promptTokens
+  print $ map (\token -> vocab !! token) promptTokens
   printf "%d %f\n" seedValue temperature
