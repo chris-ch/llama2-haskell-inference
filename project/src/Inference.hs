@@ -8,6 +8,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Binary.Get as BG
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
+import qualified Data.Array as A
 
 import System.Random
 import Data.Array (Array, array, range)
@@ -19,6 +20,7 @@ import Data.Binary.Get (runGet, getInt32le, getWord32le, getFloatle)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text, pack, unpack, isAscii)
+import qualified Data.List as DL
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Word (Word32)
 
@@ -89,23 +91,23 @@ loadNetwork networkConfigFile = return Network
               <$> getInt32le <*> getInt32le <*> getInt32le <*> getInt32le <*> getInt32le
               <*> getInt32le <*> getInt32le) networkConfigFile
 
-parseTokens :: BSL.ByteString -> Int -> ([String], [Float])
+parseTokens :: BSL.ByteString -> Int -> ([T.Text], [Float])
 parseTokens file size = (vocab, vocabScores)
   where
-    readToken :: BG.Get (Float, String)
+    readToken :: BG.Get (Float, T.Text)
     readToken = do
       score <- BG.getFloatle
       length <- BG.getInt32le
       bstr <- TE.decodeUtf8 . BSL.toStrict <$> BG.getLazyByteString (fromIntegral length)
-      return (score, unpack bstr)
+      return (score, bstr)
 
-    scoresAndStrings :: BG.Get [(Float, String)]
+    scoresAndStrings :: BG.Get [(Float, T.Text)]
     scoresAndStrings = replicateM size readToken
 
     vocabScores = fst <$> BG.runGet scoresAndStrings file
     vocab = snd <$> BG.runGet scoresAndStrings file
 
-tokenizerInit :: BSL.ByteString -> Int -> ([String], [Float])
+tokenizerInit :: BSL.ByteString -> Int -> ([T.Text], [Float])
 tokenizerInit file size = parseTokens (BSL.drop 4 file) size
 
 makeInitState :: Network -> RunState
@@ -116,6 +118,43 @@ makeInitState network = RunState
   } where
       bounds = ((0, 0, 0, 0), (seqLen network - 1, nLayers network - 1, numAttentionHeads network - 1, headDimension network - 1))
 
+strLookup :: Text -> [T.Text] -> Int
+strLookup occurrence = fromMaybe (-1) . DL.findIndex (occurrence ==)
+
+processTokens :: [Int] -> [T.Text] -> [Float] -> [Int]
+processTokens tokens vocab vocabScores = process tokens
+  where
+    process :: [Int] -> [Int]
+    process tokens' =
+      case findBestPair tokens' of
+        Just (bestIdx, bestId) ->
+          process (mergePair bestIdx bestId tokens')
+        Nothing ->
+          tokens'
+
+    findBestPair :: [Int] -> Maybe (Int, Int)
+    findBestPair tokens' = foldr checkPair Nothing (zip [0..] (zip tokens' (drop 1 tokens')))
+      where
+        checkPair :: (Int, (Int, Int)) -> Maybe (Int, Int) -> Maybe (Int, Int)
+        checkPair (count, (tokenPrev, tokenNext)) acc =
+          case strLookup ((vocab !! tokenPrev) `T.append` (vocab !! tokenNext)) vocab of
+            pos | pos /= -1 && vocabScores !! pos > bestScore ->
+              Just (count, pos)
+            _ ->
+              acc
+
+        bestScore :: Float
+        bestScore = -1e10
+
+    mergePair :: Int -> Int -> [Int] -> [Int]
+    mergePair idx id tokens' =
+      take idx tokens' ++ [id] ++ drop (idx + 2) tokens'
+
+--bpeEncode :: T.Text -> [T.Text] -> V.Vector Float -> [Int]
+--bpeEncode prompt vocab vocabScores = processTokens tokens vocab vocabScores
+--  where
+--    tokens = map (\char -> strLookup (T.unpack char) vocab) (T.unpack prompt)
+
 run :: BSL.ByteString -> BSL.ByteString -> Double -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let seedValue = fromMaybe 0 seed -- Provide a default value if seed is Nothing
@@ -123,5 +162,5 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
 
   putStrLn $ "created network: " ++ show network
-  mapM_ putStrLn vocab
+  mapM_ (putStr . unpack) vocab
   printf "%d %f\n" seedValue temperature
