@@ -45,6 +45,8 @@ library:
   - text
   - directory
   - filepath
+  - vector
+  - split
 
 executables:
   cli-app:
@@ -64,6 +66,8 @@ executables:
     - text
     - directory
     - filepath
+    - vector
+    - split
 
 tests:
   project-test:

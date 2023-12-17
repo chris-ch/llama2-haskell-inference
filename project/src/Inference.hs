@@ -9,35 +9,37 @@ import qualified Data.Binary.Get as BG
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
 import qualified Data.Array as A
+import qualified Data.List as DL
+import qualified Data.List.Split as DLS
+import qualified Numeric.LinearAlgebra as LA
+
 
 import System.Random
 import Data.Array (Array, array, range)
-import Numeric.LinearAlgebra (Vector, Matrix, konst, sumElements, cmap, size, vector)
-
+import Numeric.LinearAlgebra (konst, sumElements, cmap, size, vector)
 import Control.Monad (replicateM)
 import Control.Monad.IO.Class (liftIO)
 import Data.Binary.Get (runGet, getInt32le, getWord32le, getFloatle)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text, isAscii)
-import qualified Data.List as DL
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Word (Word32)
 
 data TransformerWeighting = TransformerWeighting
-    { tokenEmbeddingTable :: Array Int Float
-    , rmsAttWeight :: Array Int Float
-    , wq :: Array Int Float
-    , wk :: Array Int Float
-    , wv :: Array Int Float
-    , wo :: Array Int Float
-    , rmsFfnWeight :: Array Int Float
-    , w1 :: Array Int Float
-    , w3 :: Array Int Float
-    , w2 :: Array Int Float
-    , rmsFinalWeight :: Array Int Float
-    , freqCisReal :: Array (Int, Int) Float
-    , freqCisImag :: Array (Int, Int) Float
+    { tokenEmbeddingTable :: LA.Matrix Float
+    , rmsAttWeight :: LA.Matrix Float
+    , wq :: [LA.Matrix Float]
+    , wk :: [LA.Matrix Float]
+    , wv :: [LA.Matrix Float]
+    , wo :: [LA.Matrix Float]
+    , rmsFfnWeight :: LA.Matrix Float
+    , w1 :: [LA.Matrix Float]
+    , w3 :: [LA.Matrix Float]
+    , w2 :: [LA.Matrix Float]
+    , rmsFinalWeight :: LA.Vector Float
+    , freqCisReal :: LA.Matrix Float
+    , freqCisImag :: LA.Matrix Float
     } deriving (Show)
 
 data Network = Network
@@ -48,18 +50,17 @@ data Network = Network
     , numKeyValueHeads :: Int
     , vocabSize :: Int
     , seqLen :: Int
-    , weighting :: Maybe TransformerWeighting
     , headDimension :: Int
     } deriving (Show)
 
 data RunState = RunState
-    { scores :: Matrix Float -- scores/attention values (n_heads, seq_len)
+    { scores :: LA.Matrix Float -- scores/attention values (n_heads, seq_len)
     , keyCache :: Array (Int, Int, Int, Int) Float
     , valueCache :: Array (Int, Int, Int, Int) Float
     } deriving (Show)
 
 
-rmsNorm :: Vector Double -> Vector Double -> Vector Double
+rmsNorm :: LA.Vector Double -> LA.Vector Double -> LA.Vector Double
 rmsNorm x weight =
   let ss = (sumElements (x^2) / fromIntegral (size x)) + 1e-5
       normalized = cmap (* (1.0 / sqrt ss)) x
@@ -81,7 +82,6 @@ loadNetwork networkConfigFile = return Network
         , numKeyValueHeads = fromIntegral numKeyValueHeads
         , vocabSize = fromIntegral $ abs vocabSize
         , seqLen = fromIntegral seqLen
-        , weighting = Nothing  -- Replace with actual initialization logic
         , headDimension = fromIntegral dim `div` fromIntegral numAttentionHeads
         }
         where
@@ -90,6 +90,61 @@ loadNetwork networkConfigFile = return Network
               (\a b c d e f g -> (a, b, c, d, e, f, g)) 
               <$> getInt32le <*> getInt32le <*> getInt32le <*> getInt32le <*> getInt32le
               <*> getInt32le <*> getInt32le) networkConfigFile
+
+readAsArray :: Int -> BG.Get (LA.Vector Float)
+readAsArray count = do
+    bytes <- replicateM (count * 4) getFloatle
+    return $ LA.fromList bytes
+
+readMatrix :: Int -> Int -> BG.Get (LA.Matrix Float)
+readMatrix nrows ncols = do
+    bytes <- replicateM (nrows * ncols * 4) getFloatle
+    return $ LA.fromLists (DLS.chunksOf ncols bytes)
+
+readMatrices :: Int -> Int -> Int -> BG.Get [LA.Matrix Float]
+readMatrices ndepth nrows ncols = do
+    bytes <- replicateM (nrows * ncols * ndepth * 4) getFloatle
+    let chunks = DLS.chunksOf (nrows * ncols) bytes
+        matrices = map (\chunk -> LA.reshape ncols (LA.fromList chunk)) chunks
+    return matrices
+
+checkpointInitWeights :: Network -> BSL.ByteString -> TransformerWeighting
+checkpointInitWeights conf file =
+    let nrows = vocabSize conf
+        ncols = dim conf
+        nLayers' = nLayers conf
+        hiddenDim' = hiddenDim conf
+        headDimension' = headDimension conf
+        seqLen' = seqLen conf
+    in runGet (do
+        tokenEmbeddingTable <- readMatrix nrows ncols
+        rmsAttWeight <- readMatrix nLayers' ncols
+        wq <- readMatrices nLayers' ncols ncols
+        wk <- readMatrices nLayers' ncols ncols
+        wv <- readMatrices nLayers' ncols ncols
+        wo <- readMatrices nLayers' ncols ncols
+        rmsFfnWeight <- readMatrix nLayers' ncols
+        w1 <- readMatrices nLayers' ncols hiddenDim'
+        w2 <- readMatrices nLayers' hiddenDim' ncols
+        w3 <- readMatrices nLayers' ncols hiddenDim'
+        rmsFinalWeight <- readAsArray ncols
+        freqCisReal <- readMatrix seqLen' (headDimension' `div` 2)
+        freqCisImag <- readMatrix seqLen' (headDimension' `div` 2)
+        return $ TransformerWeighting
+            { tokenEmbeddingTable = tokenEmbeddingTable
+            , rmsAttWeight = rmsAttWeight
+            , wq = wq
+            , wk = wk
+            , wv = wv
+            , wo = wo
+            , rmsFfnWeight = rmsFfnWeight
+            , w1 = w1
+            , w2 = w2
+            , w3 = w3
+            , rmsFinalWeight = rmsFinalWeight
+            , freqCisReal = freqCisReal
+            , freqCisImag = freqCisImag
+            }) file
 
 parseTokens :: BSL.ByteString -> Int -> ([T.Text], [Float])
 parseTokens file size = (vocab, vocabScores)
@@ -112,7 +167,7 @@ tokenizerInit file size = parseTokens (BSL.drop 4 file) size
 
 makeInitState :: Network -> RunState
 makeInitState network = RunState
-  { scores = konst (0::Float) (numAttentionHeads network, seqLen network) :: Matrix Float
+  { scores = konst (0::Float) (numAttentionHeads network, seqLen network) :: LA.Matrix Float
   , keyCache = array bounds [(index, 0::Float) | index <- range bounds]
   , valueCache = array bounds [(index, 0::Float) | index <- range bounds]
   } where
@@ -159,7 +214,8 @@ run :: BSL.ByteString -> BSL.ByteString -> Double -> Int -> Maybe String -> Mayb
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let seedValue = fromMaybe 0 seed -- Provide a default value if seed is Nothing
   network <- loadNetwork modelFileContent
-  let 
+  let
+    weighting = checkpointInitWeights network modelFileContent
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     state = makeInitState network
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
