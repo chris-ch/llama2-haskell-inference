@@ -10,8 +10,8 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
 
 import System.Random
-import Numeric.LinearAlgebra
-import Data.Array
+import Data.Array (Array, array, range)
+import Numeric.LinearAlgebra (Vector, Matrix, konst, sumElements, cmap, size, vector)
 
 import Control.Monad (replicateM)
 import Control.Monad.IO.Class (liftIO)
@@ -34,8 +34,8 @@ data TransformerWeighting = TransformerWeighting
     , w3 :: Array Int Float
     , w2 :: Array Int Float
     , rmsFinalWeight :: Array Int Float
-    , freqCisReal :: Array Int (Array Int Float)
-    , freqCisImag :: Array Int (Array Int Float)
+    , freqCisReal :: Array (Int, Int) Float
+    , freqCisImag :: Array (Int, Int) Float
     } deriving (Show)
 
 data Network = Network
@@ -51,9 +51,9 @@ data Network = Network
     } deriving (Show)
 
 data RunState = RunState
-    { scores :: Array Int (Array Int Float) -- scores/attention values (n_heads, seq_len)
-    , keyCache :: Array Int (Array Int (Array Int Float)) -- (layer, seq_len, dim)
-    , valueCache :: Array Int (Array Int (Array Int Float)) -- (layer, seq_len, dim)
+    { scores :: Matrix Float -- scores/attention values (n_heads, seq_len)
+    , keyCache :: Array (Int, Int, Int, Int) Float
+    , valueCache :: Array (Int, Int, Int, Int) Float
     } deriving (Show)
 
 
@@ -108,6 +108,13 @@ parseTokens file size = (vocab, vocabScores)
 tokenizerInit :: BSL.ByteString -> Int -> ([String], [Float])
 tokenizerInit file size = parseTokens (BSL.drop 4 file) size
 
+makeInitState :: Network -> RunState
+makeInitState network = RunState
+  { scores = konst (0::Float) (numAttentionHeads network, seqLen network) :: Matrix Float
+  , keyCache = array bounds [(index, 0::Float) | index <- range bounds]
+  , valueCache = array bounds [(index, 0::Float) | index <- range bounds]
+  } where
+      bounds = ((0, 0, 0, 0), (seqLen network - 1, nLayers network - 1, numAttentionHeads network - 1, headDimension network - 1))
 
 run :: BSL.ByteString -> BSL.ByteString -> Double -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
@@ -116,5 +123,5 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
 
   putStrLn $ "created network: " ++ show network
-  print vocab
+  mapM_ putStrLn vocab
   printf "%d %f\n" seedValue temperature
