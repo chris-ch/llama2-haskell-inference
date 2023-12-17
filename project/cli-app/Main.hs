@@ -39,6 +39,6 @@ main = do
     printf "loading tokenizer %s\n" tokenizerAbsolutePath
     modelFileContent <- BSL.hGetContents modelFileHandle
     tokenizerFileContent <- BSL.hGetContents tokenizerFileHandle
-    Inference.run modelFileContent tokenizerFileContent temperature steps prompt seed
+    Inference.run modelFileContent tokenizerFileContent (realToFrac temperature) steps prompt seed
     hClose modelFileHandle
     hClose tokenizerFileHandle

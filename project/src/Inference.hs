@@ -8,13 +8,13 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Binary.Get as BG
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
+import qualified Data.Char as C
 import qualified Data.Array as A
 import qualified Data.List as DL
 import qualified Data.List.Split as DLS
 import qualified Numeric.LinearAlgebra as LA
+import qualified System.Random as R
 
-
-import System.Random
 import Data.Array (Array, array, range)
 import Numeric.LinearAlgebra (konst, sumElements, cmap, size, vector)
 import Control.Monad (replicateM)
@@ -60,14 +60,33 @@ data Network = Network
     , weighting :: TransformerWeighting
     } deriving (Show)
 
-rmsNorm :: LA.Vector Double -> LA.Vector Double -> LA.Vector Double
-rmsNorm x weight =
-  let ss = (sumElements (x^2) / fromIntegral (size x)) + 1e-5
-      normalized = cmap (* (1.0 / sqrt ss)) x
+rmsNorm :: LA.Vector Float -> LA.Vector Float -> LA.Vector Float
+rmsNorm vector weight =
+  let ss = (sumElements (vector^2) / fromIntegral (size vector)) + 1e-5
+      normalized = cmap (* (1.0 / sqrt ss)) vector
   in weight * normalized
 
-readAsArray :: Int -> BG.Get (LA.Vector Float)
-readAsArray count = do
+softmax :: LA.Vector Float -> Int -> LA.Vector Float
+softmax values size = softmaxValues <> (LA.subVector size (LA.size values - size) values)
+  where
+    maxVal = LA.maxElement $ LA.subVector 0 size values
+    expValues = LA.cmap exp (LA.subVector 0 size values - LA.scalar maxVal)
+    sumExpValues = LA.sumElements expValues
+    softmaxValues = LA.cmap (/ sumExpValues) expValues
+
+drawSample :: LA.Vector Float -> IO Int
+drawSample probabilities = do
+  r <- R.randomIO :: IO Float
+  let cdf = DL.scanl1 (+) (LA.toList probabilities)
+  return $ go cdf r 0
+  where
+    go (p:ps) r acc
+      | r < p = acc
+      | otherwise = go ps r (acc + 1)
+    go _ _ acc = acc
+
+readVector :: Int -> BG.Get (LA.Vector Float)
+readVector count = do
     values <- replicateM (count) getFloatle
     return $ LA.fromList values
 
@@ -102,7 +121,7 @@ initModel networkConfigFile = runGet (do
         w1 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         w2 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
         w3 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
-        rmsFinalWeight <- readAsArray (fromIntegral dim)
+        rmsFinalWeight <- readVector (fromIntegral dim)
         freqCisReal <- readMatrix (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
         freqCisImag <- readMatrix (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
 
@@ -200,7 +219,36 @@ bpeEncode prompt vocab vocabScores =
   let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
   in processTokens tokens vocab vocabScores
 
-run :: BSL.ByteString -> BSL.ByteString -> Double -> Int -> Maybe String -> Maybe Int -> IO ()
+transformer :: Int -> Int -> Network -> RunState -> LA.Vector Float
+transformer tokenCode timestep network state =
+  -- Replace this with your actual implementation
+  LA.fromList (replicate (vocabSize network) 1.0)
+
+generate :: Network -> RunState -> Int -> [Int] -> Float -> [Text] -> IO [Text]
+generate network state checkedMaxSteps promptTokens temperature vocab =
+  go 0 []
+  where
+    go timestep result
+      | timestep >= checkedMaxSteps = return result
+      | otherwise = do
+        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1 state
+        go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
+
+generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> RunState -> IO (Text, Int)
+generateNextToken timestep promptTokens temperature network vocab tokenCode state = do
+  let logits = transformer tokenCode timestep network state
+  nextToken <- if timestep < length promptTokens
+    then return (promptTokens !! timestep)
+    else if temperature == 0.0
+      then return (LA.maxIndex logits)
+      else drawSample $ softmax (LA.cmap (/ temperature) logits) (vocabSize network)
+  let tokenStr =
+        if tokenCode == 1 && C.isSpace (T.head (vocab !! nextToken))
+          then T.tail (vocab !! nextToken)
+          else vocab !! nextToken
+  return (tokenStr, nextToken)
+
+run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let
     seedValue = fromMaybe 0 seed -- Provide a default value if seed is Nothing
@@ -209,9 +257,10 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     state = makeInitState network
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
-
+  result <- generate network state steps promptTokens temperature vocab
   putStrLn $ "created network: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable (weighting network)))
   --putStrLn $ "created weighting: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable weighting))
   print promptTokens
   print $ map (\token -> vocab !! token) promptTokens
   printf "%d %f\n" seedValue temperature
+  print result
