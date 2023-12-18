@@ -27,9 +27,9 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Data.Word (Word32)
 
 data RunState = RunState
-    { scores :: LA.Matrix Float -- scores/attention values (n_heads, seq_len)
-    , keyCache :: Array (Int, Int, Int, Int) Float
-    , valueCache :: Array (Int, Int, Int, Int) Float
+    { scores :: [LA.Vector Float]
+    , keyCache :: [[[LA.Vector Float]]]
+    , valueCache :: [[[LA.Vector Float]]]
     } deriving (Show)
 
 data TransformerWeighting = TransformerWeighting
@@ -59,6 +59,13 @@ data Network = Network
     , headDimension :: Int
     , weighting :: TransformerWeighting
     } deriving (Show)
+
+makeInitState :: Network -> RunState
+makeInitState network = RunState
+    { scores = replicate (numAttentionHeads network) (konst (0 :: Float) (seqLen network) :: LA.Vector Float)
+    , keyCache = replicate (seqLen network) $ replicate (nLayers network) $ replicate (numAttentionHeads network) (konst (0 :: Float) (headDimension network) :: LA.Vector Float)
+    , valueCache = replicate (seqLen network) $ replicate (nLayers network) $ replicate (numAttentionHeads network) (konst (0 :: Float) (headDimension network) :: LA.Vector Float)
+    }
 
 rmsNorm :: LA.Vector Float -> LA.Vector Float -> LA.Vector Float
 rmsNorm vector weight =
@@ -174,14 +181,6 @@ parseTokens file size = (vocab, vocabScores)
 tokenizerInit :: BSL.ByteString -> Int -> ([T.Text], [Float])
 tokenizerInit file size = parseTokens (BSL.drop 4 file) size
 
-makeInitState :: Network -> RunState
-makeInitState network = RunState
-  { scores = konst (0::Float) (numAttentionHeads network, seqLen network) :: LA.Matrix Float
-  , keyCache = array bounds [(index, 0::Float) | index <- range bounds]
-  , valueCache = array bounds [(index, 0::Float) | index <- range bounds]
-  } where
-      bounds = ((0, 0, 0, 0), (seqLen network - 1, nLayers network - 1, numAttentionHeads network - 1, headDimension network - 1))
-
 strLookup :: Text -> [T.Text] -> Int
 strLookup occurrence = fromMaybe (-1) . DL.findIndex (occurrence ==)
 
@@ -247,6 +246,18 @@ generateNextToken timestep promptTokens temperature network vocab tokenCode stat
           then T.tail (vocab !! nextToken)
           else vocab !! nextToken
   return (tokenStr, nextToken)
+
+applyRotations :: Network -> [Float] -> [Float] -> [Float] -> [Float]
+applyRotations network head freqCisRealRow freqCisImagRow =
+  concatMap (\headItemIndex ->
+                let real = freqCisRealRow !! (headItemIndex `div` 2)
+                    imag = freqCisImagRow !! (headItemIndex `div` 2)
+                    value = head !! headItemIndex
+                    valueNext = head !! (headItemIndex + 1)
+                in [value * real - valueNext * imag, value * imag + valueNext * real]
+            ) [0, 2 .. networkHeadDimension - 2]
+  where
+    networkHeadDimension = headDimension network
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
