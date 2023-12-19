@@ -38,7 +38,7 @@ ghc-options:
 library:
   source-dirs: project/src
   dependencies:
-  - hmatrix
+  - matrix
   - bytestring
   - array
   - binary
@@ -47,6 +47,7 @@ library:
   - filepath
   - vector
   - split
+  - mtl
 
 executables:
   cli-app:
@@ -59,7 +60,7 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - hmatrix
+    - matrix
     - bytestring
     - binary
     - array
@@ -68,6 +69,7 @@ executables:
     - filepath
     - vector
     - split
+    - mtl
 
 tests:
   project-test:

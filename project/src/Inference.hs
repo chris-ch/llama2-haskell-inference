@@ -9,14 +9,14 @@ import qualified Data.Binary.Get as BG
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
 import qualified Data.Char as C
-import qualified Data.Array as A
 import qualified Data.List as DL
 import qualified Data.List.Split as DLS
-import qualified Numeric.LinearAlgebra as LA
 import qualified System.Random as R
+import qualified Data.Vector as V
+import qualified Data.Matrix as M
 
-import Data.Array (Array, array, range)
-import Numeric.LinearAlgebra (konst, sumElements, cmap, size, vector)
+import System.IO
+import Control.Monad.State
 import Control.Monad (replicateM)
 import Control.Monad.IO.Class (liftIO)
 import Data.Binary.Get (runGet, getInt32le, getWord32le, getFloatle)
@@ -25,27 +25,28 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text, isAscii)
 import Data.Text.Encoding.Error (lenientDecode)
 import Data.Word (Word32)
+import Data.Vector (Vector)
+import Data.Matrix (Matrix)
 
-data RunState = RunState
-    { scores :: [LA.Vector Float]
-    , keyCache :: [[[LA.Vector Float]]]
-    , valueCache :: [[[LA.Vector Float]]]
+data RunCache = RunCache
+    { keyCache :: [[[Vector Float]]]
+    , valueCache :: [[[Vector Float]]]
     } deriving (Show)
 
 data TransformerWeighting = TransformerWeighting
-    { tokenEmbeddingTable :: LA.Matrix Float
-    , rmsAttWeight :: LA.Matrix Float
-    , wq :: [LA.Matrix Float]
-    , wk :: [LA.Matrix Float]
-    , wv :: [LA.Matrix Float]
-    , wo :: [LA.Matrix Float]
-    , rmsFfnWeight :: LA.Matrix Float
-    , w1 :: [LA.Matrix Float]
-    , w3 :: [LA.Matrix Float]
-    , w2 :: [LA.Matrix Float]
-    , rmsFinalWeight :: LA.Vector Float
-    , freqCisReal :: LA.Matrix Float
-    , freqCisImag :: LA.Matrix Float
+    { tokenEmbeddingTable :: Matrix Float
+    , rmsAttWeight :: [Vector Float]
+    , wq :: [Matrix Float]
+    , wk :: [Matrix Float]
+    , wv :: [Matrix Float]
+    , wo :: [Matrix Float]
+    , rmsFfnWeight :: [Vector Float]
+    , w1 :: [Matrix Float]
+    , w3 :: [Matrix Float]
+    , w2 :: [Matrix Float]
+    , rmsFinalWeight :: Vector Float
+    , freqCisReal :: [Vector Float]
+    , freqCisImag ::[Vector Float]
     } deriving (Show)
 
 data Network = Network
@@ -60,54 +61,35 @@ data Network = Network
     , weighting :: TransformerWeighting
     } deriving (Show)
 
-makeInitState :: Network -> RunState
-makeInitState network = RunState
-    { scores = replicate (numAttentionHeads network) (konst (0 :: Float) (seqLen network) :: LA.Vector Float)
-    , keyCache = replicate (seqLen network) $ replicate (nLayers network) $ replicate (numAttentionHeads network) (konst (0 :: Float) (headDimension network) :: LA.Vector Float)
-    , valueCache = replicate (seqLen network) $ replicate (nLayers network) $ replicate (numAttentionHeads network) (konst (0 :: Float) (headDimension network) :: LA.Vector Float)
-    }
+type TokenCode = Int
+type Timestep = Int
+type MaxSteps = Int
+type Temperature = Float
+type Tokens = [Int]
+type Vocab = [Text]
 
-rmsNorm :: LA.Vector Float -> LA.Vector Float -> LA.Vector Float
-rmsNorm vector weight =
-  let ss = (sumElements (vector^2) / fromIntegral (size vector)) + 1e-5
-      normalized = cmap (* (1.0 / sqrt ss)) vector
-  in weight * normalized
-
-softmax :: LA.Vector Float -> Int -> LA.Vector Float
-softmax values size = softmaxValues <> (LA.subVector size (LA.size values - size) values)
-  where
-    maxVal = LA.maxElement $ LA.subVector 0 size values
-    expValues = LA.cmap exp (LA.subVector 0 size values - LA.scalar maxVal)
-    sumExpValues = LA.sumElements expValues
-    softmaxValues = LA.cmap (/ sumExpValues) expValues
-
-drawSample :: LA.Vector Float -> IO Int
-drawSample probabilities = do
-  r <- R.randomIO :: IO Float
-  let cdf = DL.scanl1 (+) (LA.toList probabilities)
-  return $ go cdf r 0
-  where
-    go (p:ps) r acc
-      | r < p = acc
-      | otherwise = go ps r (acc + 1)
-    go _ _ acc = acc
-
-readVector :: Int -> BG.Get (LA.Vector Float)
+readVector :: Int -> BG.Get (Vector Float)
 readVector count = do
     values <- replicateM (count) getFloatle
-    return $ LA.fromList values
+    return $ V.fromList values
 
-readMatrix :: Int -> Int -> BG.Get (LA.Matrix Float)
+readMatrix :: Int -> Int -> BG.Get (Matrix Float)
 readMatrix nrows ncols = do
     values <- replicateM (nrows * ncols) getFloatle
-    return $ LA.fromLists (DLS.chunksOf ncols values)
+    return $ M.fromLists (DLS.chunksOf ncols values)
 
-readMatrices :: Int -> Int -> Int -> BG.Get [LA.Matrix Float]
+readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
 readMatrices ndepth nrows ncols = do
-    values <- replicateM (nrows * ncols * ndepth) getFloatle
-    let chunks = DLS.chunksOf (nrows * ncols) values
-        matrices = map (\chunk -> LA.reshape ncols (LA.fromList chunk)) chunks
-    return matrices
+  values <- replicateM (nrows * ncols * ndepth) getFloatle
+  let
+    chunkSize = nrows * ncols
+    matrices = [ M.fromList nrows ncols $ take chunkSize (drop (i * chunkSize) values) | i <- [0 .. (length values `div` chunkSize) - 1]]
+  return matrices
+
+readVectors :: Int -> Int -> BG.Get [Vector Float]
+readVectors nrows ncols = do
+  values <- replicateM (nrows * ncols) getFloatle
+  return [ V.fromList $ take ncols (drop (i * ncols) values) | i <- [0 .. (length values `div` ncols) - 1]]
 
 initModel :: BSL.ByteString -> Network
 initModel networkConfigFile = runGet (do
@@ -119,18 +101,18 @@ initModel networkConfigFile = runGet (do
         vocabSize <- getInt32le
         seqLen <- getInt32le
         tokenEmbeddingTable <- readMatrix (fromIntegral vocabSize) (fromIntegral dim)
-        rmsAttWeight <- readMatrix (fromIntegral nLayers) (fromIntegral dim)
+        rmsAttWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
         wq <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         wk <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         wv <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         wo <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        rmsFfnWeight <- readMatrix (fromIntegral nLayers) (fromIntegral dim)
+        rmsFfnWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
         w1 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         w2 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
         w3 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
         rmsFinalWeight <- readVector (fromIntegral dim)
-        freqCisReal <- readMatrix (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
-        freqCisImag <- readMatrix (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
+        freqCisReal <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
+        freqCisImag <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
 
         let
             headDimension = dim `div` numAttentionHeads
@@ -218,46 +200,51 @@ bpeEncode prompt vocab vocabScores =
   let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
   in processTokens tokens vocab vocabScores
 
-transformer :: Int -> Int -> Network -> RunState -> LA.Vector Float
-transformer tokenCode timestep network state =
-  -- Replace this with your actual implementation
-  LA.fromList (replicate (vocabSize network) 1.0)
-
-generate :: Network -> RunState -> Int -> [Int] -> Float -> [Text] -> IO [Text]
-generate network state checkedMaxSteps promptTokens temperature vocab =
+generateTokens :: Network -> RunCache -> Int -> [Int] -> Float -> [Text] -> IO [Text]
+generateTokens network cache checkedMaxSteps promptTokens temperature vocab =
   go 0 []
   where
     go timestep result
       | timestep >= checkedMaxSteps = return result
       | otherwise = do
-        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1 state
+        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1 cache
         go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
 
-generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> RunState -> IO (Text, Int)
-generateNextToken timestep promptTokens temperature network vocab tokenCode state = do
-  let logits = transformer tokenCode timestep network state
+argmax :: (Ord a) => V.Vector a -> Int
+argmax = V.maxIndex
+
+softmax :: Vector Float -> Int -> Vector Float
+softmax values size = V.concat [softmaxValues, V.slice size (V.length values - size) values]
+  where
+    maxVal = V.maximum (V.take size values)
+    expValues = V.map (\x -> exp (x - maxVal)) (V.take size values)
+    sumExpValues = V.sum expValues
+    softmaxValues = V.map (\x -> x / sumExpValues) expValues
+
+drawSample :: Vector Float -> IO Int
+drawSample probabilities = do
+  r <- R.randomIO :: IO Float
+  let cdf = DL.scanl1 (+) (V.toList probabilities)
+  return $ go cdf r 0
+  where
+    go (p:ps) r acc
+      | r < p = acc
+      | otherwise = go ps r (acc + 1)
+    go _ _ acc = acc
+
+generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> RunCache -> IO (Text, Int)
+generateNextToken timestep promptTokens temperature network vocab tokenCode cache = do
+  let logits = V.replicate 288 0.1  -- transformer tokenCode timestep network cache
   nextToken <- if timestep < length promptTokens
     then return (promptTokens !! timestep)
     else if temperature == 0.0
-      then return (LA.maxIndex logits)
-      else drawSample $ softmax (LA.cmap (/ temperature) logits) (vocabSize network)
+      then return (argmax logits)
+      else drawSample $ softmax (V.map (/ temperature) logits) (vocabSize network)
   let tokenStr =
         if tokenCode == 1 && C.isSpace (T.head (vocab !! nextToken))
           then T.tail (vocab !! nextToken)
           else vocab !! nextToken
   return (tokenStr, nextToken)
-
-applyRotations :: Network -> [Float] -> [Float] -> [Float] -> [Float]
-applyRotations network head freqCisRealRow freqCisImagRow =
-  concatMap (\headItemIndex ->
-                let real = freqCisRealRow !! (headItemIndex `div` 2)
-                    imag = freqCisImagRow !! (headItemIndex `div` 2)
-                    value = head !! headItemIndex
-                    valueNext = head !! (headItemIndex + 1)
-                in [value * real - valueNext * imag, value * imag + valueNext * real]
-            ) [0, 2 .. networkHeadDimension - 2]
-  where
-    networkHeadDimension = headDimension network
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
@@ -266,11 +253,12 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     network = initModel modelFileContent
     --weighting = checkpointInitWeights network modelFileContent
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
-    state = makeInitState network
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
-  result <- generate network state steps promptTokens temperature vocab
-  putStrLn $ "created network: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable (weighting network)))
+    initCache = RunCache { keyCache = [], valueCache = [] }
+  result <- generateTokens network initCache steps promptTokens temperature vocab
+  --putStrLn $ "created network: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable (weighting network)))
   --putStrLn $ "created weighting: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable weighting))
+  printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
   print promptTokens
   print $ map (\token -> vocab !! token) promptTokens
   printf "%d %f\n" seedValue temperature
