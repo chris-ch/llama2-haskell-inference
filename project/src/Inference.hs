@@ -243,16 +243,15 @@ computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
   in
     (headsQ, headsK, headsV)
 
-multiheadActivation :: Network -> Int -> RunCache -> [Vector Float] -> Matrix Float
-multiheadActivation network indexLayer cache headsQ = 
-    fromVectors [buildActivation hd indexLayer vc indexHead (scores indexHead)
+multiheadActivation :: Network -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
+multiheadActivation network indexLayer keyCache valueCache headsQ = 
+    fromVectors [buildActivation hd indexLayer valueCache indexHead (scores indexHead)
                     | indexHead <- [0 .. numAttentionHeads network - 1]]
     where
       hd = headDimension network
-      vc = valueCache cache
       scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
         where
-          rawScores = computeScores hd cache indexLayer indexHead headsQ
+          rawScores = computeScores hd keyCache indexLayer indexHead headsQ
       fromVectors :: [Vector Float] -> Matrix Float
       fromVectors vectorList = M.fromLists $ map V.toList vectorList
 
@@ -264,12 +263,12 @@ buildActivation dim indexLayer valueCache indexHead headScores =
       activations = [multiplyWithAttention i | i <- [0 .. numHeads - 1]]
   in  foldl vectorSum (V.replicate numHeads 0.0) activations
 
-computeScores :: Int -> RunCache -> Int -> Int -> [Vector Float] -> Vector Float
-computeScores headDimension cache indexLayer indexHead headsQ = V.fromList $ map calculateScore (keyCache cache)
+computeScores :: Int -> [[[Vector Float]]] -> Int -> Int -> [Vector Float] -> Vector Float
+computeScores headDimension keyCache indexLayer indexHead headsQ = V.fromList $ map calculateScore keyCache
   where
     calculateScore :: [[Vector Float]] -> Float
-    calculateScore keyCache = 
-      let keyVector = ((keyCache !! indexLayer) !! indexHead) 
+    calculateScore keyVectors = 
+      let keyVector = ((keyVectors !! indexLayer) !! indexHead) 
           score = (dotProduct (headsQ !! indexHead) keyVector) / sqrt (fromIntegral (headDimension))
       in score
 
