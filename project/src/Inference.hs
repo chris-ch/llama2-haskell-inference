@@ -15,6 +15,7 @@ import qualified System.Random as R
 import qualified Data.Vector as V
 import qualified Data.Matrix as M
 
+import Control.Monad.State
 import Control.Monad (replicateM)
 import Data.Binary.Get (runGet, getInt32le, getFloatle)
 import Text.Printf (printf)
@@ -27,6 +28,24 @@ data RunCache = RunCache
     { keyCache :: [[[Vector Float]]]
     , valueCache :: [[[Vector Float]]]
     } deriving (Show)
+
+update3DList :: [[[a]]] -> Int -> Int -> [a] -> [[[a]]]
+update3DList list i j elemList = take i list ++ [update2DList (list !! i) j elemList] ++ drop (i + 1) list
+
+update2DList :: [[a]] -> Int -> [a] -> [[a]]
+update2DList list i elemList = take i list ++ [list !! i ++ elemList] ++ drop (i + 1) list
+
+appendStepKey :: State RunCache ()
+appendStepKey = modify (\state -> state {keyCache = keyCache state ++ [[]]})
+
+appendStepValue :: State RunCache ()
+appendStepValue = modify (\state -> state {valueCache = valueCache state ++ [[]]})
+
+appendStepLayerKey :: Int -> Int -> [Vector Float] -> State RunCache ()
+appendStepLayerKey stepCount indexLayer vectors = modify (\state -> state { keyCache = update3DList (keyCache state) stepCount indexLayer vectors })
+
+appendStepLayerValue :: Int -> Int -> [V.Vector Float] -> State RunCache ()
+appendStepLayerValue stepCount indexLayer vectors = modify (\state -> state { valueCache = update3DList (valueCache state) stepCount indexLayer vectors })
 
 data TransformerWeighting = TransformerWeighting
     { tokenEmbeddingTable :: Matrix Float
@@ -193,16 +212,6 @@ bpeEncode prompt vocab vocabScores =
   let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
   in processTokens tokens vocab vocabScores
 
-generateTokens :: Network -> RunCache -> Int -> [Int] -> Float -> [Text] -> IO [Text]
-generateTokens network cache checkedMaxSteps promptTokens temperature vocab =
-  go 0 []
-  where
-    go timestep result
-      | timestep >= checkedMaxSteps = return result
-      | otherwise = do
-        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1 cache
-        go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
-
 argmax :: (Ord a) => V.Vector a -> Int
 argmax = V.maxIndex
 
@@ -224,9 +233,6 @@ drawSample probabilities = do
       | r < p = acc
       | otherwise = go ps r (acc + 1)
     go _ _ acc = acc
-
-transformer :: Int -> Int -> Network -> RunCache -> Vector Float
-transformer tokenCode timestep network cache = V.replicate (vocabSize network) 1.0  -- Replace this with your actual implementation
 
 computeQKV :: Network -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
 computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
@@ -288,20 +294,6 @@ applyRotations network head freqCisRealRow freqCisImagRow =
               valueNext = head V.! (i - 1)
           in value * imag + valueNext * real
 
-generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> RunCache -> IO (Text, Int)
-generateNextToken timestep promptTokens temperature network vocab tokenCode cache = do
-  let logits = transformer tokenCode timestep network cache
-  nextToken <- if timestep < length promptTokens
-    then return (promptTokens !! timestep)
-    else if temperature == 0.0
-      then return (argmax logits)
-      else drawSample $ softmax (V.map (/ temperature) logits) (vocabSize network)
-  let tokenStr =
-        if tokenCode == 1 && C.isSpace (T.head (vocab !! nextToken))
-          then T.tail (vocab !! nextToken)
-          else vocab !! nextToken
-  return (tokenStr, nextToken)
-
 matrixVectorMult :: (Num a) => Matrix a -> Vector a -> Vector a
 matrixVectorMult matrix vector = M.getCol 0 $ M.multStd2 matrix (M.colVector vector)
 
@@ -361,6 +353,35 @@ createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow
         deltaTokenFFN = (computeDeltaFFN (weighting network) indexLayer token')
     in (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
 
+
+transformer :: Int -> Int -> Network -> RunCache -> StateT RunCache IO (Vector Float)
+transformer tokenCode timestep network cache = do
+  return $ V.replicate (vocabSize network) 1.0  -- Replace this with your actual implementation
+
+generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> RunCache -> StateT RunCache IO (Text, Int)
+generateNextToken timestep promptTokens temperature network vocab tokenCode cache = do
+  logits <- transformer tokenCode timestep network cache
+  nextToken <- if timestep < length promptTokens
+    then return (promptTokens !! timestep)
+    else if temperature == 0.0
+      then return (argmax logits)
+      else liftIO $ drawSample $ softmax (V.map (/ temperature) logits) (vocabSize network)
+  let tokenStr =
+        if tokenCode == 1 && C.isSpace (T.head (vocab !! nextToken))
+          then T.tail (vocab !! nextToken)
+          else vocab !! nextToken
+  return (tokenStr, nextToken)
+
+generateTokens :: Network -> Int -> [Int] -> Float -> [Text] -> StateT RunCache IO [Text]
+generateTokens network checkedMaxSteps promptTokens temperature vocab = go 0 []
+  where
+    go timestep result
+      | timestep >= checkedMaxSteps = return result
+      | otherwise = do
+        cache <- get
+        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1 cache
+        go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
+
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let
@@ -370,7 +391,7 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
     initCache = RunCache { keyCache = [], valueCache = [] }
-  textList <- generateTokens network initCache steps promptTokens temperature vocab
+  (textList, finalState) <- runStateT (generateTokens network steps promptTokens temperature vocab) initCache
   --putStrLn $ "created network: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable (weighting network)))
   --putStrLn $ "created weighting: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable weighting))
   printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
