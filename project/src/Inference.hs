@@ -341,6 +341,21 @@ computeDeltaFFN weighting indexLayer token =
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
     in matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
 
+replaceAtIndex :: Int -> a -> [a] -> [a]
+replaceAtIndex index newValue list
+  | index < 0 || index >= length list = list
+  | otherwise = take index list ++ [newValue] ++ drop (index + 1) list
+
+createLayerToken :: Network -> Int -> RunCache -> Int -> Vector Float -> Vector Float -> Vector Float -> (Vector Float, [[[Vector Float]]], [[[Vector Float]]])
+createLayerToken network stepCount cache indexLayer freqCisRealRow freqCisImagRow token = 
+    let (headsQ, headsK, headsV) = (computeQKV network indexLayer freqCisRealRow freqCisImagRow token, keyCache', valueCache')
+        keyCacheStep = (keyCache cache) ++ headsK
+        keyCache' = (keyCache cache)
+        valueCache' = (valueCache cache)
+        token' = token
+        deltaTokenFFN = (computeDeltaFFN (weighting network) indexLayer token')
+    in (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
+
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let
@@ -350,11 +365,11 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
     initCache = RunCache { keyCache = [], valueCache = [] }
-  result <- generateTokens network initCache steps promptTokens temperature vocab
+  textList <- generateTokens network initCache steps promptTokens temperature vocab
   --putStrLn $ "created network: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable (weighting network)))
   --putStrLn $ "created weighting: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable weighting))
   printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
   print promptTokens
   print $ map (\token -> vocab !! token) promptTokens
   printf "%d %f\n" seedValue temperature
-  print result
+  putStrLn $ T.unpack $ T.intercalate (T.pack " ") textList
