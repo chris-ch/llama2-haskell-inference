@@ -178,10 +178,8 @@ processTokens tokens vocab vocabScores = process tokens
         checkPair :: (Int, (Int, Int)) -> Maybe (Int, Int) -> Maybe (Int, Int)
         checkPair (count, (tokenPrev, tokenNext)) acc =
           case strLookup ((vocab !! tokenPrev) `T.append` (vocab !! tokenNext)) vocab of
-            pos | pos /= -1 && vocabScores !! pos > bestScore ->
-              Just (count, pos)
-            _ ->
-              acc
+            pos | pos /= -1 && vocabScores !! pos > bestScore -> Just (count, pos)
+            _ -> acc
 
         bestScore :: Float
         bestScore = -1e10
@@ -349,13 +347,13 @@ replaceAtIndex index newValue list
   | index < 0 || index >= length list = list
   | otherwise = take index list ++ [newValue] ++ drop (index + 1) list
 
-createLayerToken :: Network -> Int -> RunCache -> Int -> Vector Float -> Vector Float -> Vector Float -> (Vector Float, [[[Vector Float]]], [[[Vector Float]]])
-createLayerToken network stepCount cache indexLayer freqCisRealRow freqCisImagRow token = 
+createLayerToken :: Network -> Int -> [[[Vector Float]]] -> [[[Vector Float]]] -> Int -> Vector Float -> Vector Float -> Vector Float -> (Vector Float, [[[Vector Float]]], [[[Vector Float]]])
+createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow freqCisImagRow token = 
     let (headsQ, headsK, headsV) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
-        keyCacheStep = ((keyCache cache) !! stepCount) ++ [headsK]
-        valueCacheStep = ((valueCache cache) !! stepCount) ++ [headsV]
-        keyCache' = replaceAtIndex stepCount keyCacheStep (keyCache cache)
-        valueCache' = replaceAtIndex stepCount valueCacheStep (valueCache cache)
+        keyCacheStep = (keyCache !! stepCount) ++ [headsK]
+        valueCacheStep = (valueCache !! stepCount) ++ [headsV]
+        keyCache' = replaceAtIndex stepCount keyCacheStep keyCache
+        valueCache' = replaceAtIndex stepCount valueCacheStep valueCache
         activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
