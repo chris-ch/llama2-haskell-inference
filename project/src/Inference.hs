@@ -243,7 +243,37 @@ computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
   in
     (headsQ, headsK, headsV)
 
-applyRotations :: Network -> V.Vector Float -> V.Vector Float -> V.Vector Float -> V.Vector Float
+multiheadActivation :: Network -> Int -> RunCache -> [Vector Float] -> Matrix Float
+multiheadActivation network indexLayer cache headsQ = 
+    fromVectors [buildActivation hd indexLayer vc indexHead (scores indexHead)
+                    | indexHead <- [0 .. numAttentionHeads network - 1]]
+    where
+      hd = headDimension network
+      vc = valueCache cache
+      scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
+        where
+          rawScores = computeScores hd cache indexLayer indexHead headsQ
+      fromVectors :: [Vector Float] -> Matrix Float
+      fromVectors vectorList = M.fromLists $ map V.toList vectorList
+
+buildActivation :: Int -> Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
+buildActivation dim indexLayer valueCache indexHead headScores =
+  let numHeads = length valueCache
+      valueVectors = [ valueCache !! i !! indexLayer !! indexHead | i <- [0 .. numHeads - 1]]
+      multiplyWithAttention i = V.map (* headScores !! i) (valueVectors !! i)
+      activations = [multiplyWithAttention i | i <- [0 .. numHeads - 1]]
+  in  foldl vectorSum (V.replicate numHeads 0.0) activations
+
+computeScores :: Int -> RunCache -> Int -> Int -> [Vector Float] -> Vector Float
+computeScores headDimension cache indexLayer indexHead headsQ = V.fromList $ map calculateScore (keyCache cache)
+  where
+    calculateScore :: [[Vector Float]] -> Float
+    calculateScore keyCache = 
+      let keyVector = ((keyCache !! indexLayer) !! indexHead) 
+          score = (dotProduct (headsQ !! indexHead) keyVector) / sqrt (fromIntegral (headDimension))
+      in score
+
+applyRotations :: Network -> Vector Float -> Vector Float -> Vector Float -> Vector Float
 applyRotations network head freqCisRealRow freqCisImagRow =
     V.generate (V.length head) handleItem
   where
@@ -286,6 +316,9 @@ dotProduct vec1 vec2 = V.sum $ elementsProduct vec1 vec2
 
 elementsProduct:: (Num a) => V.Vector a -> V.Vector a -> V.Vector a
 elementsProduct vec1 vec2 = V.zipWith (*) vec1 vec2
+
+vectorSum:: (Num a) => V.Vector a -> V.Vector a -> V.Vector a
+vectorSum vec1 vec2 = V.zipWith (+) vec1 vec2
 
 rmsNorm :: Vector Float -> Vector Float -> Vector Float
 rmsNorm vector weights =
