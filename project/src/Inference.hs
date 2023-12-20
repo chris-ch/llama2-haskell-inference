@@ -326,6 +326,22 @@ rmsNorm vector weights =
       normalized = V.map (* (1.0 / sqrt ss)) vector
   in  elementsProduct weights normalized
 
+sigmoidLinearUnit :: Float -> Float
+sigmoidLinearUnit value = value / (1.0 + exp (-value))
+
+computeDeltaFFN :: TransformerWeighting -> Int -> Vector Float -> Vector Float
+computeDeltaFFN weighting indexLayer token =
+    let
+      rmsFFNWeight = (rmsFfnWeight weighting) !! indexLayer
+      weight1 = (w1 weighting) !! indexLayer
+      weight2 = (w2 weighting) !! indexLayer
+      weight3 = (w3 weighting) !! indexLayer
+      rba = rmsNorm token rmsFFNWeight
+      hiddenDimensionBuffer1 = matrixVectorMult weight1 rba
+      hiddenDimensionBuffer2 = matrixVectorMult weight3 rba
+      sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
+    in matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
+
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   let
