@@ -319,6 +319,9 @@ elementsProduct vec1 vec2 = V.zipWith (*) vec1 vec2
 vectorSum:: (Num a) => V.Vector a -> V.Vector a -> V.Vector a
 vectorSum vec1 vec2 = V.zipWith (+) vec1 vec2
 
+reshapeMatrixToVector :: Matrix a -> V.Vector a
+reshapeMatrixToVector = V.fromList . M.toList
+
 rmsNorm :: Vector Float -> Vector Float -> Vector Float
 rmsNorm vector weights =
   let ss = ((dotProduct vector vector) / fromIntegral (V.length vector)) + 1e-5
@@ -348,11 +351,15 @@ replaceAtIndex index newValue list
 
 createLayerToken :: Network -> Int -> RunCache -> Int -> Vector Float -> Vector Float -> Vector Float -> (Vector Float, [[[Vector Float]]], [[[Vector Float]]])
 createLayerToken network stepCount cache indexLayer freqCisRealRow freqCisImagRow token = 
-    let (headsQ, headsK, headsV) = (computeQKV network indexLayer freqCisRealRow freqCisImagRow token, keyCache', valueCache')
-        keyCacheStep = (keyCache cache) ++ headsK
-        keyCache' = (keyCache cache)
-        valueCache' = (valueCache cache)
-        token' = token
+    let (headsQ, headsK, headsV) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
+        keyCacheStep = ((keyCache cache) !! stepCount) ++ [headsK]
+        valueCacheStep = ((valueCache cache) !! stepCount) ++ [headsV]
+        keyCache' = replaceAtIndex stepCount keyCacheStep (keyCache cache)
+        valueCache' = replaceAtIndex stepCount valueCacheStep (valueCache cache)
+        activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
+        wO = wo (weighting network)
+        deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
+        token' = V.zipWith (+) token deltaTokenQKV
         deltaTokenFFN = (computeDeltaFFN (weighting network) indexLayer token')
     in (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
 
