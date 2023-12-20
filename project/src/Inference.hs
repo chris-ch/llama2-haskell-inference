@@ -15,16 +15,11 @@ import qualified System.Random as R
 import qualified Data.Vector as V
 import qualified Data.Matrix as M
 
-import System.IO
-import Control.Monad.State
 import Control.Monad (replicateM)
-import Control.Monad.IO.Class (liftIO)
-import Data.Binary.Get (runGet, getInt32le, getWord32le, getFloatle)
+import Data.Binary.Get (runGet, getInt32le, getFloatle)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
-import Data.Text (Text, isAscii)
-import Data.Text.Encoding.Error (lenientDecode)
-import Data.Word (Word32)
+import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Matrix (Matrix)
 
@@ -150,8 +145,8 @@ parseTokens file size = (vocab, vocabScores)
     readToken :: BG.Get (Float, T.Text)
     readToken = do
       score <- BG.getFloatle
-      length <- BG.getInt32le
-      bstr <- TE.decodeUtf8 . BSL.toStrict <$> BG.getLazyByteString (fromIntegral length)
+      tokenSize <- BG.getInt32le
+      bstr <- TE.decodeUtf8 . BSL.toStrict <$> BG.getLazyByteString (fromIntegral tokenSize)
       return (score, bstr)
 
     scoresAndStrings :: BG.Get [(Float, T.Text)]
@@ -192,8 +187,8 @@ processTokens tokens vocab vocabScores = process tokens
         bestScore = -1e10
 
     mergePair :: Int -> Int -> [Int] -> [Int]
-    mergePair idx id tokens' =
-      take idx tokens' ++ [id] ++ drop (idx + 2) tokens'
+    mergePair idx code tokens' =
+      take idx tokens' ++ [code] ++ drop (idx + 2) tokens'
 
 bpeEncode :: T.Text -> [T.Text] -> [Float] -> [Int]
 bpeEncode prompt vocab vocabScores =
@@ -232,9 +227,43 @@ drawSample probabilities = do
       | otherwise = go ps r (acc + 1)
     go _ _ acc = acc
 
+transformer :: Int -> Int -> Network -> RunCache -> Vector Float
+transformer tokenCode timestep network cache = V.replicate (vocabSize network) 1.0  -- Replace this with your actual implementation
+
+computeQKV :: Network -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
+computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
+  let
+    rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
+    wQ = splitVector (numAttentionHeads network) (matrixVectorMult ((wq (weighting network)) !! indexLayer) rba)
+    headsQ = map (\vector -> applyRotations network vector freqCisRealRow freqCisImagRow) wQ
+    wK = splitVector (numAttentionHeads network) (matrixVectorMult ((wk (weighting network)) !! indexLayer) rba)
+    headsK = map (\vector -> applyRotations network vector freqCisRealRow freqCisImagRow) wK
+
+    headsV = splitVector (numAttentionHeads network) (matrixVectorMult ((wv (weighting network)) !! indexLayer) rba)
+  in
+    (headsQ, headsK, headsV)
+
+applyRotations :: Network -> V.Vector Float -> V.Vector Float -> V.Vector Float -> V.Vector Float
+applyRotations network head freqCisRealRow freqCisImagRow =
+    V.generate (V.length head) handleItem
+  where
+    handleItem i
+      | even i = 
+          let real = freqCisRealRow V.! (i `div` 2)
+              imag = freqCisImagRow V.! (i `div` 2)
+              value = head V.! i
+              valueNext = head V.! (i + 1)
+          in value * real - valueNext * imag
+      | otherwise = 
+          let real = freqCisRealRow V.! (i `div` 2)
+              imag = freqCisImagRow V.! (i `div` 2)
+              value = head V.! i
+              valueNext = head V.! (i - 1)
+          in value * imag + valueNext * real
+
 generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> RunCache -> IO (Text, Int)
 generateNextToken timestep promptTokens temperature network vocab tokenCode cache = do
-  let logits = V.replicate 288 0.1  -- transformer tokenCode timestep network cache
+  let logits = transformer tokenCode timestep network cache
   nextToken <- if timestep < length promptTokens
     then return (promptTokens !! timestep)
     else if temperature == 0.0
@@ -245,6 +274,24 @@ generateNextToken timestep promptTokens temperature network vocab tokenCode cach
           then T.tail (vocab !! nextToken)
           else vocab !! nextToken
   return (tokenStr, nextToken)
+
+matrixVectorMult :: (Num a) => Matrix a -> Vector a -> Vector a
+matrixVectorMult matrix vector = M.getCol 0 $ M.multStd2 matrix (M.colVector vector)
+
+splitVector :: (Num a) => Int -> V.Vector a -> [V.Vector a]
+splitVector m vec = V.toList $ V.concatMap (V.singleton . V.slice 0 m) $ V.iterateN m V.tail vec
+
+dotProduct :: (Num a) => V.Vector a -> V.Vector a -> a
+dotProduct vec1 vec2 = V.sum $ elementsProduct vec1 vec2
+
+elementsProduct:: (Num a) => V.Vector a -> V.Vector a -> V.Vector a
+elementsProduct vec1 vec2 = V.zipWith (*) vec1 vec2
+
+rmsNorm :: Vector Float -> Vector Float -> Vector Float
+rmsNorm vector weights =
+  let ss = ((dotProduct vector vector) / fromIntegral (V.length vector)) + 1e-5
+      normalized = V.map (* (1.0 / sqrt ss)) vector
+  in  elementsProduct weights normalized
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
