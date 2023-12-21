@@ -2,7 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Inference( run ) where
+module Inference where
 
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Binary.Get as BG
@@ -24,6 +24,8 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Matrix (Matrix)
 
+import Debug.Trace
+
 data RunCache = RunCache
     { keyCache :: [[[Vector Float]]]
     , valueCache :: [[[Vector Float]]]
@@ -36,16 +38,16 @@ update2DList :: [[a]] -> Int -> [a] -> [[a]]
 update2DList list i elemList = take i list ++ [list !! i ++ elemList] ++ drop (i + 1) list
 
 appendStepKey :: State RunCache ()
-appendStepKey = modify (\state -> state {keyCache = keyCache state ++ [[]]})
+appendStepKey = modify (\s -> s {keyCache = keyCache s ++ [[]]})
 
 appendStepValue :: State RunCache ()
-appendStepValue = modify (\state -> state {valueCache = valueCache state ++ [[]]})
+appendStepValue = modify (\s -> s {valueCache = valueCache s ++ [[]]})
 
 appendStepLayerKey :: Int -> Int -> [Vector Float] -> State RunCache ()
-appendStepLayerKey stepCount indexLayer vectors = modify (\state -> state { keyCache = update3DList (keyCache state) stepCount indexLayer vectors })
+appendStepLayerKey stepCount indexLayer vectors = modify (\s -> s { keyCache = update3DList (keyCache s) stepCount indexLayer vectors })
 
 appendStepLayerValue :: Int -> Int -> [V.Vector Float] -> State RunCache ()
-appendStepLayerValue stepCount indexLayer vectors = modify (\state -> state { valueCache = update3DList (valueCache state) stepCount indexLayer vectors })
+appendStepLayerValue stepCount indexLayer vectors = modify (\s -> s { valueCache = update3DList (valueCache s) stepCount indexLayer vectors })
 
 data TransformerWeighting = TransformerWeighting
     { tokenEmbeddingTable :: Matrix Float
@@ -60,7 +62,7 @@ data TransformerWeighting = TransformerWeighting
     , w2 :: [Matrix Float]
     , rmsFinalWeight :: Vector Float
     , freqCisReal :: [Vector Float]
-    , freqCisImag ::[Vector Float]
+    , freqCisImag :: [Vector Float]
     } deriving (Show)
 
 data Network = Network
@@ -74,13 +76,6 @@ data Network = Network
     , headDimension :: Int
     , weighting :: TransformerWeighting
     } deriving (Show)
-
-type TokenCode = Int
-type Timestep = Int
-type MaxSteps = Int
-type Temperature = Float
-type Tokens = [Int]
-type Vocab = [Text]
 
 readVector :: Int -> BG.Get (Vector Float)
 readVector count = do
@@ -239,17 +234,16 @@ computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
     wQ = splitVector (numAttentionHeads network) (matrixVectorMult ((wq (weighting network)) !! indexLayer) rba)
-    headsQ = map (\vector -> applyRotations network vector freqCisRealRow freqCisImagRow) wQ
+    headsQ = map (\vector -> traceStack ("rotating Q: " ++ show (V.length vector)) applyRotations vector freqCisRealRow freqCisImagRow) wQ
     wK = splitVector (numAttentionHeads network) (matrixVectorMult ((wk (weighting network)) !! indexLayer) rba)
-    headsK = map (\vector -> applyRotations network vector freqCisRealRow freqCisImagRow) wK
-
+    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
     headsV = splitVector (numAttentionHeads network) (matrixVectorMult ((wv (weighting network)) !! indexLayer) rba)
   in
-    (headsQ, headsK, headsV)
+    traceStack "computeQKV" (headsQ, headsK, headsV)
 
 multiheadActivation :: Network -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
 multiheadActivation network indexLayer keyCache valueCache headsQ = 
-    fromVectors [buildActivation hd indexLayer valueCache indexHead (scores indexHead)
+    fromVectors [buildActivation indexLayer valueCache indexHead (scores indexHead)
                     | indexHead <- [0 .. numAttentionHeads network - 1]]
     where
       hd = headDimension network
@@ -259,8 +253,8 @@ multiheadActivation network indexLayer keyCache valueCache headsQ =
       fromVectors :: [Vector Float] -> Matrix Float
       fromVectors vectorList = M.fromLists $ map V.toList vectorList
 
-buildActivation :: Int -> Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
-buildActivation dim indexLayer valueCache indexHead headScores =
+buildActivation :: Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
+buildActivation indexLayer valueCache indexHead headScores =
   let numHeads = length valueCache
       valueVectors = [ valueCache !! i !! indexLayer !! indexHead | i <- [0 .. numHeads - 1]]
       multiplyWithAttention i = V.map (* headScores !! i) (valueVectors !! i)
@@ -276,28 +270,31 @@ computeScores headDimension keyCache indexLayer indexHead headsQ = V.fromList $ 
           score = (dotProduct (headsQ !! indexHead) keyVector) / sqrt (fromIntegral (headDimension))
       in score
 
-applyRotations :: Network -> Vector Float -> Vector Float -> Vector Float -> Vector Float
-applyRotations network head freqCisRealRow freqCisImagRow =
-    V.generate (V.length head) handleItem
+applyRotations :: Vector Float -> Vector Float -> Vector Float -> Vector Float
+applyRotations headVector freqCisRealRow freqCisImagRow =
+    V.generate (V.length headVector) handleItem
   where
     handleItem i
       | even i = 
           let real = freqCisRealRow V.! (i `div` 2)
               imag = freqCisImagRow V.! (i `div` 2)
-              value = head V.! i
-              valueNext = head V.! (i + 1)
+              value = headVector V.! i
+              valueNext = headVector V.! (i + 1)
           in value * real - valueNext * imag
       | otherwise = 
           let real = freqCisRealRow V.! (i `div` 2)
               imag = freqCisImagRow V.! (i `div` 2)
-              value = head V.! i
-              valueNext = head V.! (i - 1)
+              value = headVector V.! i
+              valueNext = headVector V.! (i - 1)
           in value * imag + valueNext * real
 
 matrixVectorMult :: (Num a) => Matrix a -> Vector a -> Vector a
-matrixVectorMult matrix vector = M.getCol 0 $ M.multStd2 matrix (M.colVector vector)
+matrixVectorMult matrix vector = 
+    let result = M.getCol 0 $ M.multStd2 matrix (M.colVector vector)
+        traceMessage = "Matrix/Vector multiplication performed. Matrix: (" ++ show (M.nrows matrix) ++ " x " ++ show (M.ncols matrix) ++ "), Vector: " ++ show (V.length vector)
+    in traceStack traceMessage result
 
-splitVector :: (Num a) => Int -> V.Vector a -> [V.Vector a]
+splitVector :: Int -> V.Vector a -> [V.Vector a]
 splitVector m vec = V.toList $ V.concatMap (V.singleton . V.slice 0 m) $ V.iterateN m V.tail vec
 
 dotProduct :: (Num a) => V.Vector a -> V.Vector a -> a
@@ -316,7 +313,7 @@ rmsNorm :: Vector Float -> Vector Float -> Vector Float
 rmsNorm vector weights =
   let ss = ((dotProduct vector vector) / fromIntegral (V.length vector)) + 1e-5
       normalized = V.map (* (1.0 / sqrt ss)) vector
-  in  elementsProduct weights normalized
+  in trace "rmsNorm" elementsProduct weights normalized
 
 sigmoidLinearUnit :: Float -> Float
 sigmoidLinearUnit value = value / (1.0 + exp (-value))
@@ -332,7 +329,7 @@ computeDeltaFFN weighting indexLayer token =
       hiddenDimensionBuffer1 = matrixVectorMult weight1 rba
       hiddenDimensionBuffer2 = matrixVectorMult weight3 rba
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
-    in matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
+    in traceStack "computeDeltaFFN" matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
 
 replaceAtIndex :: Int -> a -> [a] -> [a]
 replaceAtIndex index newValue list
@@ -346,26 +343,41 @@ createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow
         valueCacheStep = (valueCache !! stepCount) ++ [headsV]
         keyCache' = replaceAtIndex stepCount keyCacheStep keyCache
         valueCache' = replaceAtIndex stepCount valueCacheStep valueCache
-        activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
+        activations = traceStack ("headsQ[0] size=" ++ show (V.length (headsQ !! 0))) multiheadActivation network indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
-        deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
+        deltaTokenQKV = traceStack ("activations " ++ show (M.nrows activations) ++ "x" ++ show (M.ncols activations)) matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
         token' = V.zipWith (+) token deltaTokenQKV
-        deltaTokenFFN = (computeDeltaFFN (weighting network) indexLayer token')
-    in (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
+        deltaTokenFFN = traceStack ("processing FFN layer" ++ show indexLayer) (computeDeltaFFN (weighting network) indexLayer token')
+    in traceStack "createLayerToken" (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
 
+transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
+transformer tokenCode stepCount network = do
+  let token = M.getRow tokenCode (tokenEmbeddingTable (weighting network))
+      freqCisRealRow = (freqCisReal (weighting network)) !! stepCount
+      freqCisImagRow = (freqCisImag (weighting network)) !! stepCount
 
-transformer :: Int -> Int -> Network -> RunCache -> StateT RunCache IO (Vector Float)
-transformer tokenCode timestep network cache = do
-  return $ V.replicate (vocabSize network) 1.0  -- Replace this with your actual implementation
+  (keyCache, valueCache) <- gets $ \c -> (keyCache c, valueCache c)
+  -- Forwarding all the layers
+  let (newToken, _, _) =
+        DL.foldl' (\(curToken, curKeyCache, curValueCache) indexLayer ->
+                     (createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow freqCisImagRow curToken))
+                  (token, keyCache, valueCache) [0 .. (nLayers network) - 1]
 
-generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> RunCache -> StateT RunCache IO (Text, Int)
-generateNextToken timestep promptTokens temperature network vocab tokenCode cache = do
-  logits <- transformer tokenCode timestep network cache
+  -- Final rmsnorm
+  let finalToken = rmsNorm newToken (rmsFinalWeight (weighting network))
+
+  -- Classifier into logits
+  return $ traceStack "createLayerToken" matrixVectorMult (tokenEmbeddingTable (weighting network)) finalToken
+
+generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> StateT RunCache IO (Text, Int)
+generateNextToken timestep promptTokens temperature network vocab tokenCode = do
+  logits <- transformer tokenCode timestep network
   nextToken <- if timestep < length promptTokens
     then return (promptTokens !! timestep)
     else if temperature == 0.0
       then return (argmax logits)
-      else liftIO $ drawSample $ softmax (V.map (/ temperature) logits) (vocabSize network)
+    else do
+      liftIO $ drawSample $ softmax (V.map (/ temperature) logits) (vocabSize network)
   let tokenStr =
         if tokenCode == 1 && C.isSpace (T.head (vocab !! nextToken))
           then T.tail (vocab !! nextToken)
@@ -379,7 +391,7 @@ generateTokens network checkedMaxSteps promptTokens temperature vocab = go 0 []
       | timestep >= checkedMaxSteps = return result
       | otherwise = do
         cache <- get
-        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1 cache
+        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1
         go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()

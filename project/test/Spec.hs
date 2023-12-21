@@ -1,2 +1,9 @@
+module Main where
+
+import Test.Hspec
+
+import qualified InferenceSpec
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = hspec $ do
+  describe "Inference tests" InferenceSpec.spec
