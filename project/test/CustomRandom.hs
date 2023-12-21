@@ -1,7 +1,12 @@
 module CustomRandom where
 
+import Data.Vector
+import Data.Matrix
+import qualified Data.Vector as V
+import qualified Data.Matrix as Mx
 import Control.Monad.State
-import Control.Monad(replicateM)
+import Control.Monad
+import qualified Control.Monad as M
 import Data.Bits
 
 -- Define the state type
@@ -40,4 +45,19 @@ customRandom currentValue =
   in ((valueStep5 + 14351514) * 32) `mod` 7777333
 
 generateRandomArray :: Int -> CustomRNG [Float]
-generateRandomArray n = replicateM n nextRandomValue
+generateRandomArray size = M.replicateM size nextRandomValue
+
+generateRandomArrays :: Int -> Int -> CustomRNG [[Float]]
+generateRandomArrays nrows ncols = M.replicateM nrows (generateRandomArray ncols)
+
+generateRandomVector :: Int -> CustomRNG (Vector Float)
+generateRandomVector size = fmap V.fromList $ M.replicateM size nextRandomValue
+
+generateRandomVectors :: Int -> Int -> CustomRNG [Vector Float]
+generateRandomVectors count size = M.replicateM count (generateRandomVector size)
+
+generateRandomMatrix :: Int -> Int -> CustomRNG (Matrix Float)
+generateRandomMatrix nrows ncols = fmap Mx.fromLists $ generateRandomArrays nrows ncols
+
+generateRandomMatrices :: Int -> Int -> Int -> CustomRNG [Matrix Float]
+generateRandomMatrices count nrows ncols = M.replicateM count (generateRandomMatrix nrows ncols)

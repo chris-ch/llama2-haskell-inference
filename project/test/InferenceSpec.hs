@@ -2,9 +2,10 @@ module InferenceSpec (spec) where
 
 import Test.Hspec
 import Inference (replaceAtIndex)
-import CustomRandom (nextRandomValue, getRandomValue, seedRandomValue, generateRandomArray, CustomRNG)
+import CustomRandom
 
-import qualified Data.Matrix as M
+import qualified Data.Matrix as Mx
+import qualified Data.Vector as V
 import Control.Monad.State
 
 spec :: Spec
@@ -34,6 +35,11 @@ spec = do
       result `shouldBe` 0.453
       finalState `shouldBe` 7460453
 
-    it "generates a custom random float" $ do
-      let (result, finalState) = runState (generateRandomArray 3) 2
-      result `shouldBe` [0.047, 0.453, 0.653]
+    it "generates custom random vector" $ do
+      let (result, finalState) = runState (generateRandomVector 3) 2
+      result `shouldBe` (V.fromList [0.047, 0.453, 0.653])
+
+    it "generates custom random matrix" $ do
+      let (result, finalState) = runState (generateRandomMatrix 3 4) 2
+      (Mx.nrows result) `shouldBe` 3
+      (Mx.ncols result) `shouldBe` 4
