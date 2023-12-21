@@ -8,6 +8,7 @@ import Control.Monad.State
 import Control.Monad
 import qualified Control.Monad as M
 import Data.Bits
+import Inference
 
 -- Define the state type
 type StateRNG = Int
@@ -61,3 +62,44 @@ generateRandomMatrix nrows ncols = fmap Mx.fromLists $ generateRandomArrays nrow
 
 generateRandomMatrices :: Int -> Int -> Int -> CustomRNG [Matrix Float]
 generateRandomMatrices count nrows ncols = M.replicateM count (generateRandomMatrix nrows ncols)
+
+buildRandomNetwork :: Int -> Int -> Int -> Int -> Int -> CustomRNG Network
+buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension = do
+    let dimension = headDimension * nLayers
+    tokenEmbeddingTable <- generateRandomMatrix nVocab dimension
+    attentionWeights <- generateRandomVectors nLayers dimension
+    queryWeights <- generateRandomMatrices nLayers dimension dimension
+    keyWeights <- generateRandomMatrices nLayers dimension dimension
+    valueWeights <- generateRandomMatrices nLayers dimension dimension
+    outputWeights <- generateRandomMatrices nLayers dimension dimension
+    ffnWeights <- generateRandomVectors nLayers dimension
+    w1 <- generateRandomMatrices nLayers hiddenDimension dimension
+    w2 <- generateRandomMatrices nLayers dimension hiddenDimension
+    w3 <- generateRandomMatrices nLayers hiddenDimension dimension
+    finalWeights <- generateRandomVector dimension
+    freqCisReal <- generateRandomVectors nSteps (headDimension `div` 2)
+    freqCisImag <- generateRandomVectors nSteps (headDimension `div` 2)
+    return Network { dim = dimension,
+        hiddenDim = hiddenDimension,
+        nLayers = nLayers,
+        numAttentionHeads = nLayers,
+        numKeyValueHeads = nLayers,
+        vocabSize = nVocab,
+        seqLen = nSteps,
+        weighting = TransformerWeighting
+            { tokenEmbeddingTable = tokenEmbeddingTable,
+            rmsAttWeight = attentionWeights,
+            wq = queryWeights,
+            wk = keyWeights,
+            wv = valueWeights,
+            wo = outputWeights,
+            rmsFfnWeight = ffnWeights,
+            w1 = w1,
+            w2 = w2,
+            w3 = w3,
+            rmsFinalWeight = finalWeights,
+            freqCisReal = freqCisReal,
+            freqCisImag = freqCisImag
+            }
+        }
+   
