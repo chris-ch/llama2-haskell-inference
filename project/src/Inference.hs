@@ -79,13 +79,16 @@ data Network = Network
 
 readVector :: Int -> BG.Get (Vector Float)
 readVector count = do
-    values <- replicateM (count) getFloatle
+    values <- replicateM count getFloatle
     return $ V.fromList values
+
+readVectors :: Int -> Int -> BG.Get [Vector Float]
+readVectors nrows ncols = replicateM nrows (readVector ncols)
 
 readMatrix :: Int -> Int -> BG.Get (Matrix Float)
 readMatrix nrows ncols = do
     values <- replicateM (nrows * ncols) getFloatle
-    return $ M.fromLists (DLS.chunksOf ncols values)
+    return $ M.fromLists (DLS.chunksOf nrows values)
 
 readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
 readMatrices ndepth nrows ncols = do
@@ -94,11 +97,6 @@ readMatrices ndepth nrows ncols = do
     chunkSize = nrows * ncols
     matrices = [ M.fromList nrows ncols $ take chunkSize (drop (i * chunkSize) values) | i <- [0 .. (length values `div` chunkSize) - 1]]
   return matrices
-
-readVectors :: Int -> Int -> BG.Get [Vector Float]
-readVectors nrows ncols = do
-  values <- replicateM (nrows * ncols) getFloatle
-  return [ V.fromList $ take ncols (drop (i * ncols) values) | i <- [0 .. (length values `div` ncols) - 1]]
 
 initModel :: BSL.ByteString -> Network
 initModel networkConfigFile = runGet (do

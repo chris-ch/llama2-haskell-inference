@@ -1,24 +1,15 @@
 {
-	"image": "mcr.microsoft.com/devcontainers/base:debian",
+	"image": "docker.io/aniketd/ghcup",
 	"features": {
-		"ghcr.io/devcontainers-contrib/features/haskell:2": {
-			"ghcVersion": "9.8.1",
-			"globalPackages": "hlint hspec pandoc",
-			"installHLS": true,
-			"downgradeGhcToSupportHls": true,
-			"installStack": true,
-			"installStackGHCupHook": true,
-			"adjustBash": true
-		},
 		"ghcr.io/rocker-org/devcontainer-features/apt-packages:1": {
-			"packages": "libblas3,liblapack3,liblapack-dev,libblas-dev"
+			"packages": "libblas3,liblapack3,liblapack-dev,libblas-dev,xz-utils"
 		}
 	},
 	"customizations": {
-		"vscode": {
-			"extensions": [
-				"justusadam.language-haskell"
-			]
-		}
+			"vscode": {
+					"extensions": [
+							"justusadam.language-haskell"
+					]
+			}
 	}
 }

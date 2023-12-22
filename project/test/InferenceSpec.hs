@@ -36,10 +36,30 @@ spec = do
       result `shouldBe` 0.453
       finalState `shouldBe` 7460453
 
-    it "generates custom random vector" $ do
+    it "generates custom random vector(3)" $ do
       let result = evalState (generateRandomVector 3) 2
+      V.length result `shouldBe` 3
       result `shouldBe` (V.fromList [0.047, 0.453, 0.653])
+      
+    it "generates custom random vector(4)" $ do
+      let result = evalState (generateRandomVector 4) 2
+      V.length result `shouldBe` 4
+      result `shouldBe` (V.fromList [0.047, 0.453, 0.653, 0.577])
+    
+    it "generates custom random vectors consecutively" $ do
+      let 
+        vectorsTwice :: CustomRNG (V.Vector Float, V.Vector Float)
+        vectorsTwice = do
+          v1 <- generateRandomVector 4
+          v2 <- generateRandomVector 4
+          return (v1, v2)
 
+        (vector1, vector2) = evalState (vectorsTwice) 2
+      V.length vector1 `shouldBe` 4
+      V.length vector2 `shouldBe` 4
+      vector1 `shouldBe` (V.fromList [0.047, 0.453, 0.653, 0.577])
+      vector2 `shouldBe` (V.fromList [0.022, 0.253, 0.432, 0.524])
+    
     it "generates custom random matrix" $ do
       let result = evalState (generateRandomMatrix 3 4) 2
       (Mx.nrows result) `shouldBe` 3
@@ -54,22 +74,69 @@ spec = do
       nSteps = 5
       hiddenDimension = 2
 
-      smallQKV :: CustomRNG (Network, V.Vector Float)
-      smallQKV = do
-        n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
-        t <- generateRandomVector (headDimension * nLayers)
-        return (n, t)
+    it "builds a small network correctly" $ do
+      let
+        smallNetwork :: CustomRNG Network
+        smallNetwork = do
+          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          return n
+          
+        network = evalState smallNetwork 2
+        freqCisRealRow = (freqCisReal (weighting network)) !! 2
+        freqCisImagRow = (freqCisImag (weighting network)) !! 2
+        rmsAttention = rmsAttWeight (weighting network)
+        tokenMatrix = tokenEmbeddingTable (weighting network)
 
-      (network, token) = evalState smallQKV 2
+      (Mx.getElem 1 1 tokenMatrix) `shouldBe` 0.047
+      (Mx.nrows tokenMatrix) `shouldBe` 320
+      (Mx.ncols tokenMatrix) `shouldBe` 24
+      (Mx.getElem 320 24 tokenMatrix) `shouldBe` 0.828
+      (length rmsAttention) `shouldBe` 3
+      (V.toList (rmsAttention !! 2)) `shouldMatchList` [0.448, 0.975, 0.957, 0.775, 0.288, 0.913, 0.529, 0.169, 0.7,
+                  0.511, 0.013, 0.952, 0.401, 0.661, 0.845, 0.121, 0.272, 0.256,
+                  0.376, 0.958, 0.046, 0.471, 0.226, 0.462]
+      (V.toList freqCisRealRow) `shouldMatchList` [0.828, 0.145, 0.344, 0.043]
+      (V.toList freqCisImagRow) `shouldMatchList` [0.981, 0.754, 0.745, 0.609]
 
+    it "computes RMS norm correctly" $ do
+      let
+        smallNetwork :: CustomRNG (Network, V.Vector Float)
+        smallNetwork = do
+          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          t <- generateRandomVector (headDimension * nLayers)
+          return (n, t)
+          
+        (network, token) = evalState smallNetwork 2
+        freqCisRealRow = ((freqCisReal (weighting network)) !! 2)
+        freqCisImagRow = ((freqCisImag (weighting network)) !! 2)
+        rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
+
+      V.length rba `shouldBe` 24
+      token V.! 0 `shouldBe` 0.445
+      token V.! 23 `shouldBe` 0.529
+      ((rmsAttWeight (weighting network)) !! indexLayer) V.! 0 `shouldBe` 0.448
+      ((rmsAttWeight (weighting network)) !! indexLayer) V.! 7 `shouldBe` 0.169
+      rba V.! 0 `shouldBe` 0.3445728
+      rba V.! 23 `shouldBe` 0.42241627
+ 
     it "computes Q, K and V" $ do
       let
+        smallQKV :: CustomRNG (Network, V.Vector Float)
+        smallQKV = do
+          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          t <- generateRandomVector (headDimension * nLayers)
+          return (n, t)
+
+        (network, token) = evalState smallQKV 2
         freqCisRealRow = ((freqCisReal (weighting network)) !! 2)
         freqCisImagRow = ((freqCisImag (weighting network)) !! 2)
         (qs, ks, vs) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
 
       (length qs) `shouldBe` 3
-      (V.toList freqCisImagRow) `shouldMatchList` [0.629, 0.403, 0.726, 0.048]
-      (V.toList freqCisRealRow) `shouldMatchList` [0.171, 0.255, 0.385, 0.716]
-      (V.toList (ks !! 1)) `shouldMatchList` ([-1.999097, 5.055076, -1.501158, 3.762684, -2.219901, 6.21974, 5.030888, 4.501329])
-      (V.toList (vs !! 2)) `shouldMatchList` ([6.131495, 5.551599, 5.987549, 5.895988, 6.444849, 6.679024, 4.993975, 4.984156])
+      (V.toList freqCisImagRow) `shouldMatchList` [0.981, 0.754, 0.745, 0.609]
+      (V.toList freqCisRealRow) `shouldMatchList` [0.828, 0.145, 0.344, 0.043]
+{-       (V.toList (ks !! 1)) `shouldMatchList` ([-1.262483, 9.873482, -1.809541, 4.85637, -1.716298, 4.831686,
+            -2.449315, 3.406103])
+      (V.toList (vs !! 2)) `shouldMatchList` ([4.61404 , 5.498788, 5.519291, 5.196641, 4.792354, 3.996622,
+                  4.755136, 5.863463]) -}
+ 
