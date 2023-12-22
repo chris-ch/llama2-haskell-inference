@@ -288,7 +288,7 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
 
 matrixVectorMult :: (Num a) => Matrix a -> Vector a -> Vector a
 matrixVectorMult matrix vector = 
-    let result = M.getCol 0 $ M.multStd2 matrix (M.colVector vector)
+    let result = M.getCol 1 $ M.multStd2 matrix (M.colVector vector)
         traceMessage = "Matrix/Vector multiplication performed. Matrix: (" ++ show (M.nrows matrix) ++ " x " ++ show (M.ncols matrix) ++ "), Vector: " ++ show (V.length vector)
     in traceStack traceMessage result
 
