@@ -293,7 +293,7 @@ matrixVectorMult matrix vector =
     in traceStack traceMessage result
 
 splitVector :: Int -> V.Vector a -> [V.Vector a]
-splitVector m vec = V.toList $ V.concatMap (V.singleton . V.slice 0 m) $ V.iterateN m V.tail vec
+splitVector m vec = fmap V.fromList $ DLS.chunksOf ((V.length vec) `div` m) (V.toList vec)
 
 dotProduct :: (Num a) => V.Vector a -> V.Vector a -> a
 dotProduct vec1 vec2 = V.sum $ elementsProduct vec1 vec2
