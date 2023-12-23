@@ -1,10 +1,15 @@
 {
-	"build": { "dockerfile": "Dockerfile" },
+	"image": "ghcr.io/chris-ch/docker-ghcup:v1.0.2",
 	"customizations": {
 			"vscode": {
 					"extensions": [
 							"justusadam.language-haskell"
 					]
 			}
-	}
+	},
+	"remoteUser": "haskell",
+	"containerUser": "haskell",
+	"mounts": [
+		"type=bind,source=/home/${localEnv:USER}/.ssh,target=/home/haskell/.ssh,readonly"
+	]
 }
