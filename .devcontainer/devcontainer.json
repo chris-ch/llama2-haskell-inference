@@ -9,6 +9,7 @@
 	},
 	"remoteUser": "haskell",
 	"mounts": [
-		"type=bind,source=${localEnv:HOME}/.ssh,target=/home/haskell/.ssh,readonly"
+		"source=${localEnv:HOME}/.ssh,target=/home/haskell/.ssh,type=bind,readonly",
+		"source=/var/run/docker.sock,target=/var/run/docker-host.sock,type=bind"
 	]
 }
