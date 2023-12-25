@@ -8,7 +8,6 @@
 			}
 	},
 	"remoteUser": "haskell",
-	"containerUser": "haskell",
 	"mounts": [
 		"type=bind,source=${localEnv:HOME}/.ssh,target=/home/haskell/.ssh,readonly"
 	]
