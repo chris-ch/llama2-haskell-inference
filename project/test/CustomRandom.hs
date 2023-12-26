@@ -80,6 +80,7 @@ buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension = do
     freqCisReal <- generateRandomVectors nSteps (headDimension `div` 2)
     freqCisImag <- generateRandomVectors nSteps (headDimension `div` 2)
     return Network { dim = dimension,
+        headDimension = headDimension,
         hiddenDim = hiddenDimension,
         nLayers = nLayers,
         numAttentionHeads = nLayers,

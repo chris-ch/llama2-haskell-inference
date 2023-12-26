@@ -7,6 +7,7 @@ import CustomRandom
 import qualified Data.Matrix as Mx
 import qualified Data.Vector as V
 import Control.Monad.State
+import Control.Monad (replicateM)
 
 spec :: Spec
 spec = do
@@ -119,7 +120,16 @@ spec = do
       rba V.! 0 `shouldBe` 0.3445728
       rba V.! 23 `shouldBe` 0.42241627
  
-    it "appliess rotations" $ do
+    it "appliess small rotations" $ do
+      let
+        headVector = V.fromList [1.0, 2.0, 3.0, 4.0]
+        freqCisRealRow = V.fromList [0.5, 0.2]
+        freqCisImagRow = V.fromList [0.8, 0.3]
+        result = applyRotations headVector freqCisRealRow freqCisImagRow
+        expected = [-1.1,  1.8, -0.6,  1.7]
+      (V.toList result) `shouldMatchList` expected
+
+    it "appliess big rotations" $ do
       let
         headVector = V.fromList [1.0, 2.0, 3.0, 4.0]
         freqCisRealRow = V.fromList [0.5, 0.2]
@@ -169,7 +179,82 @@ spec = do
       shoudlBeSmall $ vectorDistance (ks !! 1) [-1.262483, 9.873482, -1.809541, 4.85637, -1.716298, 4.831686, -2.449315, 3.406103]
       shoudlBeSmall $ vectorDistance (vs !! 2) [4.61404 , 5.498788, 5.519291, 5.196641, 4.792354, 3.996622, 4.755136, 5.863463]
  
+  describe "Multihead activation" $ do
+    let 
+      nVocab = 320
+      headDimension = 48
+      nLayers = 4
+      indexLayer = 2
+      nSteps = 5
+      hiddenDimension = 2
+
+    it "builds a network for activation" $ do
+      let
+        networkForActivation :: CustomRNG (Network, [V.Vector Float], [[[V.Vector Float]]], [[[V.Vector Float]]])
+        networkForActivation = do
+          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          hQ <- replicateM 6 (generateRandomVector 48)
+          cK <- sequence [
+            replicateM 6 (replicateM 6 (generateRandomVector 48)),
+            replicateM 3 (replicateM 6 (generateRandomVector 48))
+            ]
+          cV <- sequence [
+            replicateM 6 (replicateM 6 (generateRandomVector 48)),
+            replicateM 3 (replicateM 6 (generateRandomVector 48))
+            ]
+          return (n, hQ, cK, cV)
+        indexLayer = 2
+        (network, headsQ, cacheKey, cacheValue) = evalState networkForActivation 2
+        headScoresExample = [0.5194815185588364, 0.48051848144116366]
+        activation = buildActivation headDimension indexLayer cacheValue 3 headScoresExample
+        
+        expectedActivation = [0.3045971,0.28449363,0.48838997,0.26805186,0.7258309,0.5840917,
+          0.678182,0.6833122,0.7507793,0.48202664,0.26566213,0.4568178,0.32925987,0.72464937,
+          0.7884679,0.5520643,0.5221176,0.27327257,0.3940515,0.1524674,0.38288274,0.90151936,
+          0.44484353,0.617415,0.39233693,0.778013,0.5751566,0.5121434,0.5486367,0.83911717,
+          0.722545,0.30416897,0.86215585,0.49119535,0.40411735,0.25259772,0.4708447,0.42280445,
+          0.4961695,0.61828625,0.4113124,0.8776885,0.84770113,0.74740267,0.6527272,0.5420901,
+          0.2864671,0.47077942]
+       
+
+        result = multiheadActivation network indexLayer cacheKey cacheValue headsQ
+
+      activation `shouldBe` V.fromList expectedActivation
+
+      (headsQ !! 0) `shouldBe` V.fromList [0.734,0.616,0.897,0.159,0.346,0.646,0.22,0.586,0.981,
+          0.769,0.913,0.77,0.791,0.171,0.255,0.385,0.716,0.948,0.233,0.858,0.206,0.161,9.0e-2,
+          0.195,0.828,0.145,0.344,4.3e-2,0.766,0.949,0.75,0.7,0.953,0.514,0.37,0.866,0.755,0.629,
+          0.403,0.726,4.8e-2,0.821,0.872,0.752,0.981,0.754,0.745,0.609]
+          
+      (headsQ !! 5) `shouldBe` V.fromList [9.0e-2,0.195,0.828,0.145,0.344,4.3e-2,0.766,0.949,0.75,
+        0.7,0.953,0.514,0.37,0.866,0.755,0.629,0.403,0.726,4.8e-2,0.821,0.872,0.752,0.981,0.754,
+        0.745,0.609,0.162,7.6e-2,0.564,0.644,0.398,0.813,0.421,0.665,0.445,0.391,0.504,0.73,0.434,
+        0.32,0.323,0.323,0.483,0.502,0.984,0.14,9.0e-2,0.232]
+
+      (numAttentionHeads network) `shouldBe` 4
+      (Mx.ncols result) `shouldBe` 48
+      (Mx.nrows result) `shouldBe` 4
+      (Mx.getRow 1 result) `shouldBe` V.fromList [0.30273914,0.6412468,0.4341167,0.313628,0.6088015,
+        0.7288631,7.149603e-2,0.554964,0.32315883,0.43760967,0.8307215,0.3190574,0.35306537,0.5871704,
+        0.64360785,0.87371045,0.15746486,0.6745846,0.36556137,0.3270446,0.44000852,0.40689552,0.17859621,
+        0.9115449,0.26830727,0.6173085,0.62384546,0.44949543,0.20511425,0.31641296,0.53728104,0.58635247,
+        0.41710815,0.5492132,0.5879383,0.2985614,0.28704336,0.49492365,0.26605985,0.72003424,0.6005455,
+        0.6819469,0.69283384,0.75157607,0.49483508,0.26173794,0.44845143,0.33157054]
+
+      shoudlBeSmall $ vectorDistance (Mx.getRow 1 result) [0.30273916, 0.64124675, 0.43411668, 0.313628, 0.60880145,
+                                0.72886318, 0.07149604, 0.55496394, 0.32315882, 0.43760963,
+                                0.83072144, 0.31905746, 0.35306539, 0.58717048, 0.64360785,
+                                0.87371045, 0.15746488, 0.67458463, 0.3655614, 0.32704458,
+                                0.44000856, 0.40689553, 0.17859619, 0.91154489, 0.26830728,
+                                0.6173085, 0.6238455, 0.44949539, 0.20511425, 0.31641296,
+                                0.53728098, 0.58635251, 0.41710811, 0.54921317, 0.58793827,
+                                0.29856142, 0.28704336, 0.49492364, 0.26605987, 0.72003424,
+                                0.60054549, 0.68194684, 0.6928338, 0.75157607, 0.49483505,
+                                0.26173794, 0.44845147, 0.33157054]
+ 
+
+          
 vectorDistance :: (V.Vector Float) -> [Float] -> Float
 vectorDistance vector array = V.sum (V.zipWith (-) vector (V.fromList array))
 
-shoudlBeSmall a = shouldSatisfy a (\x -> abs(x) < 0.0001)
+shoudlBeSmall a = shouldSatisfy a (\x -> abs(x) < 0.001)

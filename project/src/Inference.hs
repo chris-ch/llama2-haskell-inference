@@ -236,7 +236,7 @@ computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
 
 multiheadActivation :: Network -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
 multiheadActivation network indexLayer keyCache valueCache headsQ = 
-    fromVectors [buildActivation indexLayer valueCache indexHead (scores indexHead)
+    fromVectors [buildActivation (headDimension network) indexLayer valueCache indexHead (scores indexHead)
                     | indexHead <- [0 .. numAttentionHeads network - 1]]
     where
       hd = headDimension network
@@ -246,13 +246,13 @@ multiheadActivation network indexLayer keyCache valueCache headsQ =
       fromVectors :: [Vector Float] -> Matrix Float
       fromVectors vectorList = M.fromLists $ map V.toList vectorList
 
-buildActivation :: Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
-buildActivation indexLayer valueCache indexHead headScores =
-  let numHeads = length valueCache
-      valueVectors = [ valueCache !! i !! indexLayer !! indexHead | i <- [0 .. numHeads - 1]]
-      multiplyWithAttention i = V.map (* headScores !! i) (valueVectors !! i)
-      activations = [multiplyWithAttention i | i <- [0 .. numHeads - 1]]
-  in  foldl vectorSum (V.replicate numHeads 0.0) activations
+buildActivation :: Int -> Int -> [[[V.Vector Float]]] -> Int -> [Float] -> Vector Float
+buildActivation dimension indexLayer valueCache indexHead headScores =
+  V.foldl' (\acc (valueVector, attentionWeight) -> V.zipWith (+) acc (scale attentionWeight valueVector)) zeroVector (V.fromList zippedValues)
+  where
+    scale w vec = V.map (\x -> w * x) vec
+    zeroVector = V.replicate dimension 0.0
+    zippedValues = zip (map (\count -> valueCache !! count !! indexLayer !! indexHead) [0..]) headScores
 
 computeScores :: Int -> [[[Vector Float]]] -> Int -> Int -> [Vector Float] -> Vector Float
 computeScores headDimension keyCache indexLayer indexHead headsQ = V.fromList $ map calculateScore keyCache
