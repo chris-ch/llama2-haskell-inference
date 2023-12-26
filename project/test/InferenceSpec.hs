@@ -119,6 +119,15 @@ spec = do
       rba V.! 0 `shouldBe` 0.3445728
       rba V.! 23 `shouldBe` 0.42241627
  
+    it "appliess rotations" $ do
+      let
+        headVector = V.fromList [1.0, 2.0, 3.0, 4.0]
+        freqCisRealRow = V.fromList [0.5, 0.2]
+        freqCisImagRow = V.fromList [0.8, 0.3]
+        result = applyRotations headVector freqCisRealRow freqCisImagRow
+        expected = [-1.1,  1.8, -0.6,  1.7]
+      (V.toList result) `shouldMatchList` expected
+
     it "computes Q, K and V" $ do
       let
         smallQKV :: CustomRNG (Network, V.Vector Float)
@@ -135,6 +144,7 @@ spec = do
         weightsQ = wq (weighting network)
         qVector = matrixVectorMult (weightsQ !! indexLayer) rba
         wQ = splitVector (numAttentionHeads network) (qVector)
+        rotatedQ = applyRotations (wQ !! 2 ) freqCisRealRow freqCisImagRow
       
       (Mx.nrows (weightsQ !! indexLayer)) `shouldBe` 24
       (Mx.ncols (weightsQ !! indexLayer)) `shouldBe` 24
@@ -150,9 +160,11 @@ spec = do
       (length qs) `shouldBe` 3
       (length ks) `shouldBe` 3
       (length vs) `shouldBe` 3
+      (V.length rotatedQ) `shouldBe` 8
       
       shoudlBeSmall $ vectorDistance (V.take 4 qVector) [4.652121 , 4.394577 , 5.8498507, 5.508383]
       shoudlBeSmall $ vectorDistance (wQ !! 2) [5.5972257, 5.32329,   4.0131316, 5.037126,  4.0925946, 5.810919,  5.721209, 5.626199 ]
+      shoudlBeSmall $ vectorDistance rotatedQ [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
       shoudlBeSmall $ vectorDistance (qs !! 2) [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
       shoudlBeSmall $ vectorDistance (ks !! 1) [-1.262483, 9.873482, -1.809541, 4.85637, -1.716298, 4.831686, -2.449315, 3.406103]
       shoudlBeSmall $ vectorDistance (vs !! 2) [4.61404 , 5.498788, 5.519291, 5.196641, 4.792354, 3.996622, 4.755136, 5.863463]

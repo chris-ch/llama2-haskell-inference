@@ -91,12 +91,7 @@ readMatrix nrows ncols = do
     return $ M.fromLists (DLS.chunksOf nrows values)
 
 readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
-readMatrices ndepth nrows ncols = do
-  values <- replicateM (nrows * ncols * ndepth) getFloatle
-  let
-    chunkSize = nrows * ncols
-    matrices = [ M.fromList nrows ncols $ take chunkSize (drop (i * chunkSize) values) | i <- [0 .. (length values `div` chunkSize) - 1]]
-  return matrices
+readMatrices ndepth nrows ncols = replicateM ndepth (readMatrix nrows ncols)
 
 initModel :: BSL.ByteString -> Network
 initModel networkConfigFile = runGet (do
@@ -270,21 +265,15 @@ computeScores headDimension keyCache indexLayer indexHead headsQ = V.fromList $ 
 
 applyRotations :: Vector Float -> Vector Float -> Vector Float -> Vector Float
 applyRotations headVector freqCisRealRow freqCisImagRow =
-    V.generate (V.length headVector) handleItem
+  V.fromList $ concatMap applyRotation [0,2..V.length headVector - 2]
   where
-    handleItem i
-      | even i = 
-          let real = freqCisRealRow V.! (i `div` 2)
-              imag = freqCisImagRow V.! (i `div` 2)
-              value = headVector V.! i
-              valueNext = headVector V.! (i + 1)
-          in value * real - valueNext * imag
-      | otherwise = 
-          let real = freqCisRealRow V.! (i `div` 2)
-              imag = freqCisImagRow V.! (i `div` 2)
-              value = headVector V.! i
-              valueNext = headVector V.! (i - 1)
-          in value * imag + valueNext * real
+    applyRotation :: Int -> [Float]
+    applyRotation headItemIndex = [value * real - valueNext * imag, value * imag + valueNext * real]
+      where
+        real = freqCisRealRow V.! (headItemIndex `div` 2)
+        imag = freqCisImagRow V.! (headItemIndex `div` 2)
+        value = headVector V.! headItemIndex
+        valueNext = headVector V.! (headItemIndex + 1)
 
 matrixVectorMult :: (Num a) => Matrix a -> Vector a -> Vector a
 matrixVectorMult matrix vector = 
