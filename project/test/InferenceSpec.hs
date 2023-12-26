@@ -172,4 +172,4 @@ spec = do
 vectorDistance :: (V.Vector Float) -> [Float] -> Float
 vectorDistance vector array = V.sum (V.zipWith (-) vector (V.fromList array))
 
-shoudlBeSmall a = shouldSatisfy a (\x -> x < 0.0001)
+shoudlBeSmall a = shouldSatisfy a (\x -> abs(x) < 0.0001)
