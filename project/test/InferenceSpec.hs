@@ -241,19 +241,47 @@ spec = do
         0.41710815,0.5492132,0.5879383,0.2985614,0.28704336,0.49492365,0.26605985,0.72003424,0.6005455,
         0.6819469,0.69283384,0.75157607,0.49483508,0.26173794,0.44845143,0.33157054]
 
-      shoudlBeSmall $ vectorDistance (Mx.getRow 1 result) [0.30273916, 0.64124675, 0.43411668, 0.313628, 0.60880145,
-                                0.72886318, 0.07149604, 0.55496394, 0.32315882, 0.43760963,
-                                0.83072144, 0.31905746, 0.35306539, 0.58717048, 0.64360785,
-                                0.87371045, 0.15746488, 0.67458463, 0.3655614, 0.32704458,
-                                0.44000856, 0.40689553, 0.17859619, 0.91154489, 0.26830728,
-                                0.6173085, 0.6238455, 0.44949539, 0.20511425, 0.31641296,
-                                0.53728098, 0.58635251, 0.41710811, 0.54921317, 0.58793827,
-                                0.29856142, 0.28704336, 0.49492364, 0.26605987, 0.72003424,
-                                0.60054549, 0.68194684, 0.6928338, 0.75157607, 0.49483505,
-                                0.26173794, 0.44845147, 0.33157054]
- 
-
+      shoudlBeSmall $ vectorDistance (Mx.getRow 4 result) [0.3045971, 0.28449363, 0.48838997, 0.26805186, 0.72583091,
+                                0.58409174, 0.67818201, 0.68331219, 0.7507793, 0.48202663,
+                                0.26566214, 0.45681779, 0.32925986, 0.72464937, 0.78846788,
+                                0.55206428, 0.5221176, 0.27327259, 0.3940515, 0.15246741,
+                                0.38288274, 0.90151936, 0.44484355, 0.61741503, 0.39233694,
+                                0.77801296, 0.57515665, 0.51214337, 0.54863667, 0.83911714,
+                                0.72254506, 0.30416898, 0.86215585, 0.49119536, 0.40411736,
+                                0.25259773, 0.47084469, 0.42280443, 0.49616951, 0.61828625,
+                                0.41131239, 0.87768853, 0.84770113, 0.74740264, 0.65272719,
+                                0.54209012, 0.28646711, 0.47077943]
           
+  describe "Delta FFN" $ do
+    let 
+      nVocab = 32000
+      headDimension = 48
+      nLayers = 6
+      indexLayer = 2
+      nSteps = 256
+      hiddenDimension = 768
+
+    it "computes delta FFN" $ do
+      let
+        networkForDeltaFFN :: CustomRNG (Network, V.Vector Float)
+        networkForDeltaFFN = do
+          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          t <- generateRandomVector 288
+          return (n, t)
+        (network, token) = evalState networkForDeltaFFN 2
+        indexLayer = 4
+        deltaFFN = computeDeltaFFN (weighting network) indexLayer token
+
+      V.length deltaFFN `shouldBe` 288
+      token V.! 0 `shouldBe` 0.616
+      token V.! 287 `shouldBe` 0.176
+      deltaFFN V.! 0 `shouldBe` 1749408.5
+      deltaFFN V.! 287 `shouldBe` 1736454.9
+
+      V.sum deltaFFN `shouldBe` 5.0058973e8
+      V.minimum deltaFFN `shouldBe` 1723941.4
+      V.maximum deltaFFN `shouldBe` 1753679.8
+
 vectorDistance :: (V.Vector Float) -> [Float] -> Float
 vectorDistance vector array = V.sum (V.zipWith (-) vector (V.fromList array))
 
