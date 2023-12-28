@@ -335,7 +335,7 @@ createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
         token' = V.zipWith (+) token deltaTokenQKV
         deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token'
-    in (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
+    in (V.zipWith (+) token' deltaTokenFFN, keyCache', valueCache')
 
 transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
 transformer tokenCode stepCount network = do

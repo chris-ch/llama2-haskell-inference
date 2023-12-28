@@ -314,9 +314,13 @@ spec = do
         (q, k, v) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
         (token', cacheKey', cacheValue') = createLayerToken network stepCount cacheKey cacheValue indexLayer freqCisRealRow freqCisImagRow token
         activations = multiheadActivation network indexLayer cacheKey' cacheValue' q
+        deltaTokenQKV = matrixVectorMult ((wo (weighting network)) !! indexLayer) (reshapeMatrixToVector activations)
+
+      shouldBeSmall 1.0 $ (V.sum deltaTokenQKV) - 2897446.0276938234
+      shouldBeSmall 1.0 $ (V.maximum deltaTokenQKV) - 10245.32163638757
+      shouldBeSmall 1.0 $ (V.minimum deltaTokenQKV) - 9862.115233500097
 
       Mx.nrows activations `shouldBe` 6
-      Mx.ncols activations `shouldBe` 48
       Mx.ncols activations `shouldBe` 48
       shouldBeSmall 1e-1 $ (Mx.trace activations) - 407.2077331542969
       shouldBeSmall 1e-1 $ (sum (Mx.toList activations)) - 19385.04123687744
@@ -376,11 +380,15 @@ spec = do
       token V.! 0 `shouldBe` 0.616
       token V.! 287 `shouldBe` 0.176
       V.length token' `shouldBe` 288
-      token' V.! 0 `shouldBe` 2439003.2108297
-      token' V.! 287 `shouldBe` 2442824.50969825
-      V.sum token' `shouldBe` 701135654.4605024
-      V.minimum token' `shouldBe` 2418155.80873464
-      V.maximum token' `shouldBe` 2453978.8297747127
+
+      (V.take 5 token') `shouldBe` V.fromList [2439003.5, 2431244.5, 2431188.8, 2438949.8, 2426320.8]
+      (V.take 5 (V.drop 283 token')) `shouldBe` V.fromList [2439129.5, 2428409.0, 2433409.0, 2427229.3, 2442822.5]
+
+      token' V.! 0 `shouldBe` 2439003.5
+      token' V.! 287 `shouldBe` 2442822.55
+      V.sum token' `shouldBe` 7.0113574e8
+      V.minimum token' `shouldBe` 2418157.3
+      V.maximum token' `shouldBe` 2453980.0
 
 vectorDistance :: (V.Vector Float) -> [Float] -> Float
 vectorDistance vector array = V.sum (V.zipWith (-) vector (V.fromList array))
