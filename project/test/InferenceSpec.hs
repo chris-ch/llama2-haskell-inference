@@ -179,12 +179,12 @@ spec = do
       (length vs) `shouldBe` 3
       (V.length rotatedQ) `shouldBe` 8
       
-      shouldBeSmall $ vectorDistance (V.take 4 qVector) [4.652121 , 4.394577 , 5.8498507, 5.508383]
-      shouldBeSmall $ vectorDistance (wQ !! 2) [5.5972257, 5.32329,   4.0131316, 5.037126,  4.0925946, 5.810919,  5.721209, 5.626199 ]
-      shouldBeSmall $ vectorDistance rotatedQ [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
-      shouldBeSmall $ vectorDistance (qs !! 2) [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
-      shouldBeSmall $ vectorDistance (ks !! 1) [-1.262483, 9.873482, -1.809541, 4.85637, -1.716298, 4.831686, -2.449315, 3.406103]
-      shouldBeSmall $ vectorDistance (vs !! 2) [4.61404 , 5.498788, 5.519291, 5.196641, 4.792354, 3.996622, 4.755136, 5.863463]
+      shouldBeSmall 1e-3 $ vectorDistance (V.take 4 qVector) [4.652121 , 4.394577 , 5.8498507, 5.508383]
+      shouldBeSmall 1e-3 $ vectorDistance (wQ !! 2) [5.5972257, 5.32329,   4.0131316, 5.037126,  4.0925946, 5.810919,  5.721209, 5.626199 ]
+      shouldBeSmall 1e-3 $ vectorDistance rotatedQ [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
+      shouldBeSmall 1e-3 $ vectorDistance (qs !! 2) [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
+      shouldBeSmall 1e-3 $ vectorDistance (ks !! 1) [-1.262483, 9.873482, -1.809541, 4.85637, -1.716298, 4.831686, -2.449315, 3.406103]
+      shouldBeSmall 1e-3 $ vectorDistance (vs !! 2) [4.61404 , 5.498788, 5.519291, 5.196641, 4.792354, 3.996622, 4.755136, 5.863463]
  
   describe "Multihead activation" $ do
     let 
@@ -248,7 +248,7 @@ spec = do
         0.41710815,0.5492132,0.5879383,0.2985614,0.28704336,0.49492365,0.26605985,0.72003424,0.6005455,
         0.6819469,0.69283384,0.75157607,0.49483508,0.26173794,0.44845143,0.33157054]
 
-      shouldBeSmall $ vectorDistance (Mx.getRow 4 result) [0.3045971, 0.28449363, 0.48838997, 0.26805186, 0.72583091,
+      shouldBeSmall 1e-3 $ vectorDistance (Mx.getRow 4 result) [0.3045971, 0.28449363, 0.48838997, 0.26805186, 0.72583091,
                                 0.58409174, 0.67818201, 0.68331219, 0.7507793, 0.48202663,
                                 0.26566214, 0.45681779, 0.32925986, 0.72464937, 0.78846788,
                                 0.55206428, 0.5221176, 0.27327259, 0.3940515, 0.15246741,
@@ -313,56 +313,65 @@ spec = do
 
         (q, k, v) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
         (token', cacheKey', cacheValue') = createLayerToken network stepCount cacheKey cacheValue indexLayer freqCisRealRow freqCisImagRow token
+        activations = multiheadActivation network indexLayer cacheKey' cacheValue' q
+
+      Mx.nrows activations `shouldBe` 6
+      Mx.ncols activations `shouldBe` 48
+      Mx.ncols activations `shouldBe` 48
+      shouldBeSmall 1e-1 $ (Mx.trace activations) - 407.2077331542969
+      shouldBeSmall 1e-1 $ (sum (Mx.toList activations)) - 19385.04123687744
+      shouldBeSmall 1e-1 $ (minimum (Mx.toList activations)) - 59.436580657958984
+      shouldBeSmall 1e-1 $ (maximum (Mx.toList activations)) - 87.67498779296875
 
       length q `shouldBe` 6
       length k `shouldBe` 6
       length v `shouldBe` 6
 
-      shouldBeSmall $ (k !! 0 V.! 0) - 13.5140090
-      shouldBeSmall $ (k !! 0 V.! 47) - 76.510922895
-      shouldBeSmall $ (k !! 1 V.! 0) - 4.048432575029892
-      shouldBeSmall $ (k !! 1 V.! 47) - 75.99460779792548
-      shouldBeSmall $ (k !! 2 V.! 0) - (-7.048659211879567)
-      shouldBeSmall $ (k !! 2 V.! 47) - 74.24330840422249
-      shouldBeSmall $ (k !! 3 V.! 0) - 11.798806806020366
-      shouldBeSmall $ (k !! 3 V.! 47) - 71.89907238107276
-      shouldBeSmall $ (k !! 4 V.! 0) - 12.957168370788168
-      shouldBeSmall $ (k !! 4 V.! 47) - 74.44716220191003
-      shouldBeSmall $ (k !! 5 V.! 0) - 10.358258170685986
-      shouldBeSmall $ (k !! 5 V.! 47) - 74.42684423320338
+      shouldBeSmall 1e-3 $ (k !! 0 V.! 0) - 13.5140090
+      shouldBeSmall 1e-3 $ (k !! 0 V.! 47) - 76.510922895
+      shouldBeSmall 1e-3 $ (k !! 1 V.! 0) - 4.048432575029892
+      shouldBeSmall 1e-3 $ (k !! 1 V.! 47) - 75.99460779792548
+      shouldBeSmall 1e-3 $ (k !! 2 V.! 0) - (-7.048659211879567)
+      shouldBeSmall 1e-3 $ (k !! 2 V.! 47) - 74.24330840422249
+      shouldBeSmall 1e-3 $ (k !! 3 V.! 0) - 11.798806806020366
+      shouldBeSmall 1e-3 $ (k !! 3 V.! 47) - 71.89907238107276
+      shouldBeSmall 1e-3 $ (k !! 4 V.! 0) - 12.957168370788168
+      shouldBeSmall 1e-3 $ (k !! 4 V.! 47) - 74.44716220191003
+      shouldBeSmall 1e-3 $ (k !! 5 V.! 0) - 10.358258170685986
+      shouldBeSmall 1e-3 $ (k !! 5 V.! 47) - 74.42684423320338
  
-      shouldBeSmall $ (q !! 0 V.! 0) - 10.047595305990399
-      shouldBeSmall $ (q !! 0 V.! 47) - 73.5352357337324
-      shouldBeSmall $ (q !! 1 V.! 0) - 14.202909536670631
-      shouldBeSmall $ (q !! 1 V.! 47) - 67.21390186872122
-      shouldBeSmall $ (q !! 2 V.! 0) - 5.207165646689646
-      shouldBeSmall $ (q !! 2 V.! 47) - 76.75705530550135
-      shouldBeSmall $ (q !! 3 V.! 0) - 9.709002411821984
-      shouldBeSmall $ (q !! 3 V.! 47) - 93.7325735273318
-      shouldBeSmall $ (q !! 4 V.! 0) - 5.700445560096341
-      shouldBeSmall $ (q !! 4 V.! 47) - 73.207704757823
-      shouldBeSmall $ (q !! 5 V.! 0) - 12.008699038487975
-      shouldBeSmall $ (q !! 5 V.! 47) - 70.1946099367691
+      shouldBeSmall 1e-3 $ (q !! 0 V.! 0) - 10.047595305990399
+      shouldBeSmall 1e-3 $ (q !! 0 V.! 47) - 73.5352357337324
+      shouldBeSmall 1e-3 $ (q !! 1 V.! 0) - 14.202909536670631
+      shouldBeSmall 1e-3 $ (q !! 1 V.! 47) - 67.21390186872122
+      shouldBeSmall 1e-3 $ (q !! 2 V.! 0) - 5.207165646689646
+      shouldBeSmall 1e-3 $ (q !! 2 V.! 47) - 76.75705530550135
+      shouldBeSmall 1e-3 $ (q !! 3 V.! 0) - 9.709002411821984
+      shouldBeSmall 1e-3 $ (q !! 3 V.! 47) - 93.7325735273318
+      shouldBeSmall 1e-3 $ (q !! 4 V.! 0) - 5.700445560096341
+      shouldBeSmall 1e-3 $ (q !! 4 V.! 47) - 73.207704757823
+      shouldBeSmall 1e-3 $ (q !! 5 V.! 0) - 12.008699038487975
+      shouldBeSmall 1e-3 $ (q !! 5 V.! 47) - 70.1946099367691
 
-      shouldBeSmall $ (v !! 0 V.! 0) - 69.27178955078125
-      shouldBeSmall $ (v !! 0 V.! 47) - 68.98504638671875
-      shouldBeSmall $ (v !! 1 V.! 0) - 68.5321044921875
-      shouldBeSmall $ (v !! 1 V.! 47) - 65.29499816894531
-      shouldBeSmall $ (v !! 2 V.! 0) - 67.18028259277344
-      shouldBeSmall $ (v !! 2 V.! 47) - 66.77857971191406
-      shouldBeSmall $ (v !! 3 V.! 0) - 66.6872329711914
-      shouldBeSmall $ (v !! 3 V.! 47) - 71.23432922363281
-      shouldBeSmall $ (v !! 4 V.! 0) - 68.06254577636719
-      shouldBeSmall $ (v !! 4 V.! 47) - 69.51446533203125
-      shouldBeSmall $ (v !! 5 V.! 0) - 62.54541778564453
-      shouldBeSmall $ (v !! 5 V.! 47) - 68.81326293945312
+      shouldBeSmall 1e-3 $ (v !! 0 V.! 0) - 69.27178955078125
+      shouldBeSmall 1e-3 $ (v !! 0 V.! 47) - 68.98504638671875
+      shouldBeSmall 1e-3 $ (v !! 1 V.! 0) - 68.5321044921875
+      shouldBeSmall 1e-3 $ (v !! 1 V.! 47) - 65.29499816894531
+      shouldBeSmall 1e-3 $ (v !! 2 V.! 0) - 67.18028259277344
+      shouldBeSmall 1e-3 $ (v !! 2 V.! 47) - 66.77857971191406
+      shouldBeSmall 1e-3 $ (v !! 3 V.! 0) - 66.6872329711914
+      shouldBeSmall 1e-3 $ (v !! 3 V.! 47) - 71.23432922363281
+      shouldBeSmall 1e-3 $ (v !! 4 V.! 0) - 68.06254577636719
+      shouldBeSmall 1e-3 $ (v !! 4 V.! 47) - 69.51446533203125
+      shouldBeSmall 1e-3 $ (v !! 5 V.! 0) - 62.54541778564453
+      shouldBeSmall 1e-3 $ (v !! 5 V.! 47) - 68.81326293945312
 
       length cacheKey' `shouldBe` 3
       length cacheValue' `shouldBe` 3
-      shouldBeSmall $ (cacheKey' !! 2 !! 2 !! 0  V.! 0) - 13.514
-      shouldBeSmall $ (cacheKey' !! 2 !! 2 !! 5  V.! 47) - 74.42679
-      shouldBeSmall $ (cacheValue' !! 2 !! 2 !! 0  V.! 0) - 69.27178955
-      shouldBeSmall $ (cacheValue' !! 2 !! 2 !! 5  V.! 47) - 68.813262939
+      shouldBeSmall 1e-3 $ (cacheKey' !! 2 !! 2 !! 0  V.! 0) - 13.514
+      shouldBeSmall 1e-3 $ (cacheKey' !! 2 !! 2 !! 5  V.! 47) - 74.42679
+      shouldBeSmall 1e-3 $ (cacheValue' !! 2 !! 2 !! 0  V.! 0) - 69.27178955
+      shouldBeSmall 1e-3 $ (cacheValue' !! 2 !! 2 !! 5  V.! 47) - 68.813262939
 
       token V.! 0 `shouldBe` 0.616
       token V.! 287 `shouldBe` 0.176
@@ -376,4 +385,5 @@ spec = do
 vectorDistance :: (V.Vector Float) -> [Float] -> Float
 vectorDistance vector array = V.sum (V.zipWith (-) vector (V.fromList array))
 
-shouldBeSmall a = shouldSatisfy a (\x -> abs(x) < 0.001)
+shouldBeSmall :: Float -> Float -> Expectation
+shouldBeSmall threshold a = shouldSatisfy a (\x -> abs(x) < threshold)
