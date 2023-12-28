@@ -313,8 +313,8 @@ computeDeltaFFN weighting indexLayer token =
       weight2 = (w2 weighting) !! indexLayer
       weight3 = (w3 weighting) !! indexLayer
       rba = rmsNorm token rmsFFNWeight
-      hiddenDimensionBuffer1 = matrixVectorMult weight1 rba
-      hiddenDimensionBuffer2 = matrixVectorMult weight3 rba
+      hiddenDimensionBuffer1 = traceStack "computeDeltaFFN: hiddenDimensionBuffer1" matrixVectorMult weight1 rba
+      hiddenDimensionBuffer2 = traceStack "computeDeltaFFN: hiddenDimensionBuffer2" matrixVectorMult weight3 rba
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
     in traceStack "computeDeltaFFN" matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
 
@@ -330,12 +330,12 @@ createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow
         valueCacheStep = (valueCache !! stepCount) ++ [headsV]
         keyCache' = replaceAtIndex stepCount keyCacheStep keyCache
         valueCache' = replaceAtIndex stepCount valueCacheStep valueCache
-        activations = traceStack ("headsQ[0] size=" ++ show (V.length (headsQ !! 0))) multiheadActivation network indexLayer keyCache' valueCache' headsQ
+        activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
-        deltaTokenQKV = traceStack ("activations " ++ show (M.nrows activations) ++ "x" ++ show (M.ncols activations)) matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
+        deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
         token' = V.zipWith (+) token deltaTokenQKV
-        deltaTokenFFN = traceStack ("processing FFN layer" ++ show indexLayer) (computeDeltaFFN (weighting network) indexLayer token')
-    in traceStack "createLayerToken" (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
+        deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token'
+    in (V.zipWith (+) token deltaTokenFFN, keyCache', valueCache')
 
 transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
 transformer tokenCode stepCount network = do
