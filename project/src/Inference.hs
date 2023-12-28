@@ -339,22 +339,30 @@ createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow
 
 transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
 transformer tokenCode stepCount network = do
-  let token = M.getRow tokenCode (tokenEmbeddingTable (weighting network))
-      freqCisRealRow = (freqCisReal (weighting network)) !! stepCount
-      freqCisImagRow = (freqCisImag (weighting network)) !! stepCount
+    -- Getting the token embedding
+    let token = M.getRow tokenCode (tokenEmbeddingTable (weighting network))
 
-  (keyCache, valueCache) <- gets $ \c -> (keyCache c, valueCache c)
-  -- Forwarding all the layers
-  let (newToken, _, _) =
-        DL.foldl' (\(curToken, curKeyCache, curValueCache) indexLayer ->
-                     (createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow freqCisImagRow curToken))
-                  (token, keyCache, valueCache) [0 .. (nLayers network) - 1]
+    -- Plucking out the current row of freq_cis_real and freq_cis_imag
+    let freqCisRealRow = freqCisReal (weighting network) !! stepCount
+    let freqCisImagRow = freqCisImag (weighting network) !! stepCount
 
-  -- Final rmsnorm
-  let finalToken = rmsNorm newToken (rmsFinalWeight (weighting network))
+    -- Getting key_cache and value_cache from the cache
+    (kc, vc) <- gets (\cache -> (keyCache cache, valueCache cache))
 
-  -- Classifier into logits
-  return $ traceStack "createLayerToken" matrixVectorMult (tokenEmbeddingTable (weighting network)) finalToken
+    -- Forwarding all the layers
+    let (finalToken, finalKeyCache, finalValueCache) =
+            foldl (\(accToken, accKeyCache, accValueCache) indexLayer ->
+                     createLayerToken network stepCount accKeyCache accValueCache indexLayer freqCisRealRow freqCisImagRow accToken)
+                  (token, kc, vc)
+                  [0..nLayers network - 1]
+
+    -- Final rmsnorm
+    let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network)
+
+    -- Classifier into logits
+    let logits = matrixVectorMult (tokenEmbeddingTable (weighting network)) tokenWithRms
+
+    return logits
 
 generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> StateT RunCache IO (Text, Int)
 generateNextToken timestep promptTokens temperature network vocab tokenCode = do
