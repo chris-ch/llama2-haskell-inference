@@ -300,7 +300,7 @@ rmsNorm :: Vector Float -> Vector Float -> Vector Float
 rmsNorm vector weights =
   let ss = ((dotProduct vector vector) / fromIntegral (V.length vector)) + 1e-5
       normalized = V.map (* (1.0 / sqrt ss)) vector
-  in trace "rmsNorm" elementsProduct weights normalized
+  in elementsProduct weights normalized
 
 sigmoidLinearUnit :: Float -> Float
 sigmoidLinearUnit value = value / (1.0 + exp (-value))
@@ -313,10 +313,10 @@ computeDeltaFFN weighting indexLayer token =
       weight2 = (w2 weighting) !! indexLayer
       weight3 = (w3 weighting) !! indexLayer
       rba = rmsNorm token rmsFFNWeight
-      hiddenDimensionBuffer1 = traceStack "computeDeltaFFN: hiddenDimensionBuffer1" matrixVectorMult weight1 rba
-      hiddenDimensionBuffer2 = traceStack "computeDeltaFFN: hiddenDimensionBuffer2" matrixVectorMult weight3 rba
+      hiddenDimensionBuffer1 = matrixVectorMult weight1 rba
+      hiddenDimensionBuffer2 = matrixVectorMult weight3 rba
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
-    in traceStack "computeDeltaFFN" matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
+    in matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
 
 replaceAtIndex :: Int -> a -> [a] -> [a]
 replaceAtIndex index newValue list
@@ -349,9 +349,6 @@ transformer tokenCode stepCount network = do
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
     let freqCisRealRow = freqCisReal (weighting network) !! stepCount
     let freqCisImagRow = freqCisImag (weighting network) !! stepCount
-
-    -- Getting key_cache and value_cache from the cache
-    (kc, vc) <- gets (\cache -> (keyCache cache, valueCache cache))
 
     -- Forwarding all the layers
     finalToken <- foldM (\accToken indexLayer -> createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow accToken)
@@ -387,7 +384,6 @@ generateTokens network checkedMaxSteps promptTokens temperature vocab = go 0 []
     go timestep result
       | timestep >= checkedMaxSteps = return result
       | otherwise = do
-        cache <- get
         (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1
         go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
 
@@ -400,11 +396,9 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
     initCache = RunCache { keyCache = [], valueCache = [] }
-  (textList, finalState) <- runStateT (generateTokens network steps promptTokens temperature vocab) initCache
-  --putStrLn $ "created network: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable (weighting network)))
-  --putStrLn $ "created weighting: " ++ show (LA.subMatrix (0, 0) (1, 10) (tokenEmbeddingTable weighting))
+  textList <- evalStateT (generateTokens network steps promptTokens temperature vocab) initCache
   printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
-  print promptTokens
-  print $ map (\token -> vocab !! token) promptTokens
-  printf "%d %f\n" seedValue temperature
+  printf "prompt tokens: %s\n" $ show promptTokens
+  printf "initial sentence: %s\n" $ show $ map (\token -> vocab !! token) promptTokens
+  printf "seed value %d, temperature %f\n" seedValue temperature
   putStrLn $ T.unpack $ T.intercalate (T.pack " ") textList
