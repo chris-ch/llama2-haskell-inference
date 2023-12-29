@@ -312,7 +312,14 @@ spec = do
         freqCisImagRow = ((freqCisImag (weighting network)) !! 2)
 
         (q, k, v) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
-        (token', cacheKey', cacheValue') = createLayerToken network stepCount cacheKey cacheValue indexLayer freqCisRealRow freqCisImagRow token
+      
+      (token', runCache') <- runStateT
+        (createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow token)
+        (RunCache { keyCache = cacheKey, valueCache = cacheValue })
+
+      let
+        cacheKey' = keyCache (runCache')
+        cacheValue' = valueCache (runCache')
         activations = multiheadActivation network indexLayer cacheKey' cacheValue' q
         deltaTokenQKV = matrixVectorMult ((wo (weighting network)) !! indexLayer) (reshapeMatrixToVector activations)
 

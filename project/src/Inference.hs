@@ -16,7 +16,7 @@ import qualified Data.Vector as V
 import qualified Data.Matrix as M
 
 import Control.Monad.State
-import Control.Monad (replicateM)
+import Control.Monad (replicateM, foldM)
 import Data.Binary.Get (runGet, getInt32le, getFloatle)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
@@ -227,12 +227,12 @@ computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
     wQ = splitVector (numAttentionHeads network) (matrixVectorMult ((wq (weighting network)) !! indexLayer) rba)
-    headsQ = map (\vector -> traceStack ("rotating Q: " ++ show (V.length vector)) applyRotations vector freqCisRealRow freqCisImagRow) wQ
+    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wQ
     wK = splitVector (numAttentionHeads network) (matrixVectorMult ((wk (weighting network)) !! indexLayer) rba)
     headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
     headsV = splitVector (numAttentionHeads network) (matrixVectorMult ((wv (weighting network)) !! indexLayer) rba)
   in
-    traceStack "computeQKV" (headsQ, headsK, headsV)
+    (headsQ, headsK, headsV)
 
 multiheadActivation :: Network -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
 multiheadActivation network indexLayer keyCache valueCache headsQ = 
@@ -323,9 +323,11 @@ replaceAtIndex index newValue list
   | index < 0 || index >= length list = list
   | otherwise = take index list ++ [newValue] ++ drop (index + 1) list
 
-createLayerToken :: Network -> Int -> [[[Vector Float]]] -> [[[Vector Float]]] -> Int -> Vector Float -> Vector Float -> Vector Float -> (Vector Float, [[[Vector Float]]], [[[Vector Float]]])
-createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow freqCisImagRow token = 
-    let (headsQ, headsK, headsV) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
+createLayerToken :: Network -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> StateT RunCache IO (Vector Float)
+createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow token = do
+    (keyCache, valueCache) <- gets (\cache -> (keyCache cache, valueCache cache))
+    let
+        (headsQ, headsK, headsV) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
         keyCacheStep = (keyCache !! stepCount) ++ [headsK]
         valueCacheStep = (valueCache !! stepCount) ++ [headsV]
         keyCache' = replaceAtIndex stepCount keyCacheStep keyCache
@@ -335,7 +337,9 @@ createLayerToken network stepCount keyCache valueCache indexLayer freqCisRealRow
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
         token' = V.zipWith (+) token deltaTokenQKV
         deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token'
-    in (V.zipWith (+) token' deltaTokenFFN, keyCache', valueCache')
+        result = V.zipWith (+) token' deltaTokenFFN
+    put (RunCache keyCache' valueCache')
+    return result
 
 transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
 transformer tokenCode stepCount network = do
@@ -350,10 +354,8 @@ transformer tokenCode stepCount network = do
     (kc, vc) <- gets (\cache -> (keyCache cache, valueCache cache))
 
     -- Forwarding all the layers
-    let (finalToken, finalKeyCache, finalValueCache) =
-            foldl (\(accToken, accKeyCache, accValueCache) indexLayer ->
-                     createLayerToken network stepCount accKeyCache accValueCache indexLayer freqCisRealRow freqCisImagRow accToken)
-                  (token, kc, vc)
+    finalToken <- foldM (\accToken indexLayer -> createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow accToken)
+                  token
                   [0..nLayers network - 1]
 
     -- Final rmsnorm
