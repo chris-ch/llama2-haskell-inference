@@ -21,3 +21,12 @@ stack run -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8
 ```
 
 Generated output for that particular seed:
+TBD.
+
+### Unit testing
+Running tests matching specifically "Helper":
+
+```shell
+stack test --test-arguments='--match "Helper"'
+```
+

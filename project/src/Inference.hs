@@ -397,7 +397,7 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
     initCache = RunCache { keyCache = [], valueCache = [] }
   textList <- evalStateT (generateTokens network steps promptTokens temperature vocab) initCache
-  printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
+  printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
   printf "prompt tokens: %s\n" $ show promptTokens
   printf "initial sentence: %s\n" $ show $ map (\token -> vocab !! token) promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
