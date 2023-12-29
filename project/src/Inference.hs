@@ -12,9 +12,10 @@ import qualified Data.Char as C
 import qualified Data.List as DL
 import qualified Data.List.Split as DLS
 import qualified System.Random as R
-import qualified Data.Vector as V
-import qualified Data.Matrix as M
+import qualified Data.Vector.Unboxed as V
+import qualified Data.Matrix.Unboxed as M
 
+import Linear
 import Control.Monad.State
 import System.IO (hFlush, stdout)
 import Control.Monad (replicateM, foldM)
@@ -22,8 +23,8 @@ import Data.Binary.Get (runGet, getInt32le, getFloatle)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Data.Vector (Vector)
-import Data.Matrix (Matrix)
+import Data.Vector.Unboxed (Vector)
+import Data.Matrix.Unboxed (Matrix)
 
 import Debug.Trace
 
@@ -31,24 +32,6 @@ data RunCache = RunCache
     { keyCache :: [[[Vector Float]]]
     , valueCache :: [[[Vector Float]]]
     } deriving (Show)
-
-update3DList :: [[[a]]] -> Int -> Int -> [a] -> [[[a]]]
-update3DList list i j elemList = take i list ++ [update2DList (list !! i) j elemList] ++ drop (i + 1) list
-
-update2DList :: [[a]] -> Int -> [a] -> [[a]]
-update2DList list i elemList = take i list ++ [list !! i ++ elemList] ++ drop (i + 1) list
-
-appendStepKey :: State RunCache ()
-appendStepKey = modify (\s -> s {keyCache = keyCache s ++ [[]]})
-
-appendStepValue :: State RunCache ()
-appendStepValue = modify (\s -> s {valueCache = valueCache s ++ [[]]})
-
-appendStepLayerKey :: Int -> Int -> [Vector Float] -> State RunCache ()
-appendStepLayerKey stepCount indexLayer vectors = modify (\s -> s { keyCache = update3DList (keyCache s) stepCount indexLayer vectors })
-
-appendStepLayerValue :: Int -> Int -> [V.Vector Float] -> State RunCache ()
-appendStepLayerValue stepCount indexLayer vectors = modify (\s -> s { valueCache = update3DList (valueCache s) stepCount indexLayer vectors })
 
 data TransformerWeighting = TransformerWeighting
     { tokenEmbeddingTable :: Matrix Float
@@ -201,7 +184,7 @@ bpeEncode prompt vocab vocabScores =
   let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
   in processTokens tokens vocab vocabScores
 
-argmax :: (Ord a) => V.Vector a -> Int
+argmax :: (V.Unbox a, Ord a) => V.Vector a -> Int
 argmax = V.maxIndex
 
 softmax :: Vector Float -> Int -> Vector Float
@@ -247,10 +230,12 @@ multiheadActivation network indexLayer keyCache valueCache headsQ =
       fromVectors :: [Vector Float] -> Matrix Float
       fromVectors vectorList = M.fromLists $ map V.toList vectorList
 
-buildActivation :: Int -> Int -> [[[V.Vector Float]]] -> Int -> [Float] -> Vector Float
+buildActivation :: Int -> Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
 buildActivation dimension indexLayer valueCache indexHead headScores =
-  V.foldl' (\acc (valueVector, attentionWeight) -> V.zipWith (+) acc (scale attentionWeight valueVector)) zeroVector (V.fromList zippedValues)
+  DL.foldl' accumulate zeroVector zippedValues
   where
+    accumulate :: (Vector Float) -> ((Vector Float), Float) -> (Vector Float)
+    accumulate acc (valueVector, attentionWeight) = V.zipWith (+) acc (scale attentionWeight valueVector)
     scale w vec = V.map (\x -> w * x) vec
     zeroVector = V.replicate dimension 0.0
     zippedValues = zip (map (\count -> valueCache !! count !! indexLayer !! indexHead) [0..]) headScores
@@ -276,22 +261,22 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         value = headVector V.! headItemIndex
         valueNext = headVector V.! (headItemIndex + 1)
 
-matrixVectorMult :: (Num a) => Matrix a -> Vector a -> Vector a
-matrixVectorMult matrix vector = M.getCol 1 $ M.multStd2 matrix (M.colVector vector)
+matrixVectorMult :: Matrix Float -> Vector Float -> Vector Float
+matrixVectorMult mat vec = V.fromList [ (V.sum . V.zipWith (*) vec) row | row <- M.toRows mat ]
 
-splitVector :: Int -> V.Vector a -> [V.Vector a]
+splitVector :: Int -> V.Vector Float -> [V.Vector Float]
 splitVector m vec = fmap V.fromList $ DLS.chunksOf ((V.length vec) `div` m) (V.toList vec)
 
-dotProduct :: (Num a) => V.Vector a -> V.Vector a -> a
+dotProduct :: V.Vector Float -> V.Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ elementsProduct vec1 vec2
 
-elementsProduct:: (Num a) => V.Vector a -> V.Vector a -> V.Vector a
+elementsProduct:: V.Vector Float -> V.Vector Float -> V.Vector Float
 elementsProduct vec1 vec2 = V.zipWith (*) vec1 vec2
 
-vectorSum:: (Num a) => V.Vector a -> V.Vector a -> V.Vector a
+vectorSum:: V.Vector Float -> V.Vector Float -> V.Vector Float
 vectorSum vec1 vec2 = V.zipWith (+) vec1 vec2
 
-reshapeMatrixToVector :: Matrix a -> V.Vector a
+reshapeMatrixToVector :: Matrix Float -> V.Vector Float
 reshapeMatrixToVector = V.fromList . M.toList
 
 rmsNorm :: Vector Float -> Vector Float -> Vector Float
@@ -342,7 +327,7 @@ createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow toke
 transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
 transformer tokenCode stepCount network = do
     -- Getting the token embedding
-    let token = M.getRow tokenCode (tokenEmbeddingTable (weighting network))
+    let token = M.takeRow (tokenEmbeddingTable (weighting network)) tokenCode
 
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
     let freqCisRealRow = freqCisReal (weighting network) !! stepCount

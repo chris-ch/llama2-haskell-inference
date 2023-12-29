@@ -4,8 +4,8 @@ import Test.Hspec
 import Inference
 import CustomRandom
 
-import qualified Data.Matrix as Mx
-import qualified Data.Vector as V
+import qualified Data.Matrix.Unboxed as Mx
+import qualified Data.Vector.Unboxed as V
 import qualified Data.Binary.Get as BG
 import qualified Data.Binary.Put as BP
 import Control.Monad.State
@@ -35,10 +35,10 @@ spec = do
         rmsAttention = rmsAttWeight (weighting network)
         tokenMatrix = tokenEmbeddingTable (weighting network)
 
-      (Mx.getElem 1 1 tokenMatrix) `shouldBe` 0.047
-      (Mx.nrows tokenMatrix) `shouldBe` 320
-      (Mx.ncols tokenMatrix) `shouldBe` 24
-      (Mx.getElem 320 24 tokenMatrix) `shouldBe` 0.828
+      (tokenMatrix Mx.! (0, 0)) `shouldBe` 0.047
+      (Mx.rows tokenMatrix) `shouldBe` 320
+      (Mx.cols tokenMatrix) `shouldBe` 24
+      (tokenMatrix Mx.! (319, 23)) `shouldBe` 0.828
       (length rmsAttention) `shouldBe` 3
       (V.toList (rmsAttention !! 2)) `shouldMatchList` [0.448, 0.975, 0.957, 0.775, 0.288, 0.913, 0.529, 0.169, 0.7,
                   0.511, 0.013, 0.952, 0.401, 0.661, 0.845, 0.121, 0.272, 0.256,
@@ -101,8 +101,8 @@ spec = do
         wQ = splitVector (numAttentionHeads network) (qVector)
         rotatedQ = applyRotations (wQ !! 2 ) freqCisRealRow freqCisImagRow
       
-      (Mx.nrows (weightsQ !! indexLayer)) `shouldBe` 24
-      (Mx.ncols (weightsQ !! indexLayer)) `shouldBe` 24
+      (Mx.rows (weightsQ !! indexLayer)) `shouldBe` 24
+      (Mx.cols (weightsQ !! indexLayer)) `shouldBe` 24
       (numAttentionHeads network) `shouldBe` 3
       (V.length qVector) `shouldBe` 24
       rba V.! 0 `shouldBe` 0.3445728
@@ -176,16 +176,16 @@ spec = do
         0.32,0.323,0.323,0.483,0.502,0.984,0.14,9.0e-2,0.232]
 
       (numAttentionHeads network) `shouldBe` 4
-      (Mx.ncols result) `shouldBe` 48
-      (Mx.nrows result) `shouldBe` 4
-      (Mx.getRow 1 result) `shouldBe` V.fromList [0.30273914,0.6412468,0.4341167,0.313628,0.6088015,
+      (Mx.cols result) `shouldBe` 48
+      (Mx.rows result) `shouldBe` 4
+      (Mx.takeRow result 0) `shouldBe` V.fromList [0.30273914,0.6412468,0.4341167,0.313628,0.6088015,
         0.7288631,7.149603e-2,0.554964,0.32315883,0.43760967,0.8307215,0.3190574,0.35306537,0.5871704,
         0.64360785,0.87371045,0.15746486,0.6745846,0.36556137,0.3270446,0.44000852,0.40689552,0.17859621,
         0.9115449,0.26830727,0.6173085,0.62384546,0.44949543,0.20511425,0.31641296,0.53728104,0.58635247,
         0.41710815,0.5492132,0.5879383,0.2985614,0.28704336,0.49492365,0.26605985,0.72003424,0.6005455,
         0.6819469,0.69283384,0.75157607,0.49483508,0.26173794,0.44845143,0.33157054]
 
-      shouldBeSmall 1e-3 $ vectorDistance (Mx.getRow 4 result) [0.3045971, 0.28449363, 0.48838997, 0.26805186, 0.72583091,
+      shouldBeSmall 1e-3 $ vectorDistance (Mx.takeRow result 3) [0.3045971, 0.28449363, 0.48838997, 0.26805186, 0.72583091,
                                 0.58409174, 0.67818201, 0.68331219, 0.7507793, 0.48202663,
                                 0.26566214, 0.45681779, 0.32925986, 0.72464937, 0.78846788,
                                 0.55206428, 0.5221176, 0.27327259, 0.3940515, 0.15246741,
@@ -264,9 +264,8 @@ spec = do
       shouldBeSmall 1.0 $ (V.maximum deltaTokenQKV) - 10245.32163638757
       shouldBeSmall 1.0 $ (V.minimum deltaTokenQKV) - 9862.115233500097
 
-      Mx.nrows activations `shouldBe` 6
-      Mx.ncols activations `shouldBe` 48
-      shouldBeSmall 1e-1 $ (Mx.trace activations) - 407.2077331542969
+      Mx.rows activations `shouldBe` 6
+      Mx.cols activations `shouldBe` 48
       shouldBeSmall 1e-1 $ (sum (Mx.toList activations)) - 19385.04123687744
       shouldBeSmall 1e-1 $ (minimum (Mx.toList activations)) - 59.436580657958984
       shouldBeSmall 1e-1 $ (maximum (Mx.toList activations)) - 87.67498779296875

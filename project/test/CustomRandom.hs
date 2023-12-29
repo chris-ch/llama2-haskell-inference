@@ -1,9 +1,9 @@
 module CustomRandom where
 
-import Data.Vector
-import Data.Matrix
-import qualified Data.Vector as V
-import qualified Data.Matrix as Mx
+import Data.Vector.Unboxed
+import Data.Matrix.Unboxed
+import qualified Data.Vector.Unboxed as V
+import qualified Data.Matrix.Unboxed as Mx
 import Control.Monad.State
 import Control.Monad
 import qualified Control.Monad as M
@@ -79,7 +79,7 @@ buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension = do
     finalWeights <- generateRandomVector dimension
     freqCisReal <- generateRandomVectors nSteps (headDimension `div` 2)
     freqCisImag <- generateRandomVectors nSteps (headDimension `div` 2)
-    return Network { dim = dimension,
+    return Network { Inference.dim = dimension,
         headDimension = headDimension,
         hiddenDim = hiddenDimension,
         nLayers = nLayers,

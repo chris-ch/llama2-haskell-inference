@@ -4,8 +4,8 @@ import Test.Hspec
 import Inference
 import CustomRandom
 
-import qualified Data.Matrix as Mx
-import qualified Data.Vector as V
+import qualified Data.Matrix.Unboxed as Mx
+import qualified Data.Vector.Unboxed as V
 import qualified Data.Binary.Get as BG
 import qualified Data.Binary.Put as BP
 import Control.Monad.State
@@ -86,5 +86,5 @@ spec = do
     
     it "generates custom random matrix" $ do
       let result = evalState (generateRandomMatrix 3 4) 2
-      (Mx.nrows result) `shouldBe` 3
-      (Mx.ncols result) `shouldBe` 4
+      (Mx.rows result) `shouldBe` 3
+      (Mx.cols result) `shouldBe` 4

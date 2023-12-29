@@ -4,7 +4,7 @@ import Test.Hspec
 import Inference
 import CustomRandom
 
-import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as V
 import Control.Monad.State
 import Control.Monad (replicateM)
 
@@ -44,5 +44,5 @@ spec = do
 
       logits <- evalStateT (transformer tokenCode stepCount network) (RunCache {keyCache=cacheKey, valueCache=cacheValue})
 
-      (V.take 5 logits) `shouldBe` V.fromList [76.4879, 75.86577, 69.82336, 73.16966, 72.23717]
-      (V.take 5 (V.drop 31995 logits)) `shouldBe` V.fromList [81.34004, 77.398056, 78.24071, 82.833084, 75.38996]
+      (V.take 5 logits) `shouldBe` V.fromList [76.487885,75.86574,69.82333,73.169655,72.23714]
+      (V.take 5 (V.drop 31995 logits)) `shouldBe` V.fromList [81.34005,77.39803,78.24066,82.83305,75.38994]

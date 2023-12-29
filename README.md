@@ -17,11 +17,18 @@ stack run -- cli-app --model-file data/stories15M.bin --temperature 0.8 --steps 
 For testing purposes, you can set the _seed_ option to some value to always get the same output:
 
 ```shell
-stack run -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town"
+stack run -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town" +RTS -p
 ```
 
 Generated output for that particular seed:
 TBD.
+
+### Debugging / Profiling
+```shell
+stack build --profile  --executable-profiling --library-profiling
+stack run --profile -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town" +RTS -p
+```
+
 
 ### Unit testing
 Running tests matching specifically "Helper":

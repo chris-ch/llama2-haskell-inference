@@ -22,7 +22,8 @@ description:         Please see the README on GitHub at <https://github.com/chri
 dependencies:
   - base >= 4.7 && < 5
   - random
-  - matrix
+  - linear
+  - matrices
   - bytestring
   - binary
   - array
