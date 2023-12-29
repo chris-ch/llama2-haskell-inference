@@ -109,7 +109,7 @@ initModel networkConfigFile = runGet (do
         wv <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         wo <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         rmsFfnWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
-        w1 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
+        w1 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
         w2 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
         w3 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
         rmsFinalWeight <- readVector (fromIntegral dim)
@@ -359,7 +359,7 @@ transformer tokenCode stepCount network = do
     let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network)
 
     -- Classifier into logits
-    let logits = matrixVectorMult (tokenEmbeddingTable (weighting network)) tokenWithRms
+    let logits = matrixVectorMult (M.transpose (tokenEmbeddingTable (weighting network))) tokenWithRms
 
     return logits
 
