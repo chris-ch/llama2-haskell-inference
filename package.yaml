@@ -33,7 +33,6 @@ dependencies:
   - split
   - mtl
 
-
 ghc-options:
   - -Wall
   - -Wcompat
@@ -60,7 +59,7 @@ executables:
       - -with-rtsopts=-N
     dependencies:
       - optparse-applicative
-    default-language: Haskell2010
+    language: Haskell2010
 
 tests:
   project-test:
@@ -74,4 +73,4 @@ tests:
       - -with-rtsopts=-N
     dependencies:
       - hspec
-    default-language: Haskell2010
+    language: Haskell2010

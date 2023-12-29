@@ -6,6 +6,8 @@ import CustomRandom
 
 import qualified Data.Matrix as Mx
 import qualified Data.Vector as V
+import qualified Data.Binary.Get as BG
+import qualified Data.Binary.Put as BP
 import Control.Monad.State
 import Control.Monad (replicateM)
 
@@ -13,33 +15,47 @@ spec :: Spec
 spec = do
   describe "Helper functions" $ do
     it "replaces a value" $ do
-      replaceAtIndex 1 3.0 [1.0, 2.0, 3.0] `shouldBe` [1.0, 3.0, 3.0]
+      replaceAtIndex 1 3.0 ([1.0, 2.0, 3.0]::[Float]) `shouldBe` ([1.0, 3.0, 3.0]::[Float])
 
     it "replaces at the end of the list" $ do
-      replaceAtIndex 2 0.5 [1.0, 2.0, 3.0] `shouldBe` [1.0, 2.0, 0.5]
+      replaceAtIndex 2 0.5 ([1.0, 2.0, 3.0]::[Float]) `shouldBe` ([1.0, 2.0, 0.5]::[Float])
 
     it "reshapes matrix as vector" $ do
       reshapeMatrixToVector (Mx.fromLists [
             [0.047, 0.453, 0.653, 0.577],
              [0.022, 0.253, 0.432, 0.524],
              [0.114, 0.917, 0.747, 0.164]
-        ]) `shouldBe` V.fromList [0.047, 0.453, 0.653, 0.577, 0.022, 0.253, 0.432, 0.524, 0.114, 0.917, 0.747, 0.164]
+        ]) `shouldBe` V.fromList ([0.047, 0.453, 0.653, 0.577, 0.022, 0.253, 0.432, 0.524, 0.114, 0.917, 0.747, 0.164]::[Float])
+
+    it "reads a 2x3 matrix from a ByteString" $ do
+        let inputBytes = BP.runPut $ mapM_ BP.putFloatle [1.0, 2.0, 3.0, 4.0, -1.0, -2.0]
+            expectedMatrix :: Mx.Matrix Float
+            expectedMatrix = Mx.fromLists [[1.0, 2.0, 3.0], [4.0, -1.0, -2.0]]
+            actualMatrix = BG.runGet (readMatrix 2 3) inputBytes
+        actualMatrix `shouldBe` expectedMatrix
+
+    it "reads a 3x2 matrix from a ByteString" $ do
+        let inputBytes = BP.runPut $ mapM_ BP.putFloatle [1.0, 2.0, 3.0, 4.0, -1.0, -2.0]
+            expectedMatrix :: Mx.Matrix Float
+            expectedMatrix = Mx.fromLists [[1.0, 2.0], [3.0, 4.0], [-1.0, -2.0]]
+            actualMatrix = BG.runGet (readMatrix 3 2) inputBytes
+        actualMatrix `shouldBe` expectedMatrix
 
   describe "Custom Random Values generator" $ do
     it "generates a custom random float" $ do
       let
-        example :: CustomRNG Float
-        example = do
+        testRandom :: CustomRNG Float
+        testRandom = do
           seedRandomValue 2
           -- run the random generator twice
-          nextRandomValue
-          nextRandomValue
+          _ <- nextRandomValue
+          _ <- nextRandomValue
           -- Get the current value
           randomValue <- getRandomValue
           -- Return a tuple of random value and counter value * 2
           return randomValue
 
-        (result, finalState) = runState example 0
+        (result, finalState) = runState testRandom 0
 
       result `shouldBe` 0.453
       finalState `shouldBe` 7460453
@@ -76,7 +92,7 @@ spec = do
   describe "Inference on a small network" $ do
     let 
       nVocab = 320
-      headDimension = 8
+      headDim = 8
       nLayers = 3
       indexLayer = 2
       nSteps = 5
@@ -86,7 +102,7 @@ spec = do
       let
         smallNetwork :: CustomRNG Network
         smallNetwork = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
           return n
           
         network = evalState smallNetwork 2
@@ -110,13 +126,11 @@ spec = do
       let
         smallNetwork :: CustomRNG (Network, V.Vector Float)
         smallNetwork = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
-          t <- generateRandomVector (headDimension * nLayers)
+          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+          t <- generateRandomVector (headDim * nLayers)
           return (n, t)
           
         (network, token) = evalState smallNetwork 2
-        freqCisRealRow = ((freqCisReal (weighting network)) !! 2)
-        freqCisImagRow = ((freqCisImag (weighting network)) !! 2)
         rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
 
       V.length rba `shouldBe` 24
@@ -149,8 +163,8 @@ spec = do
       let
         smallQKV :: CustomRNG (Network, V.Vector Float)
         smallQKV = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
-          t <- generateRandomVector (headDimension * nLayers)
+          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+          t <- generateRandomVector (headDim * nLayers)
           return (n, t)
 
         (network, token) = evalState smallQKV 2
@@ -189,9 +203,8 @@ spec = do
   describe "Multihead activation" $ do
     let 
       nVocab = 320
-      headDimension = 48
+      headDim = 48
       nLayers = 4
-      indexLayer = 2
       nSteps = 5
       hiddenDimension = 2
 
@@ -199,7 +212,7 @@ spec = do
       let
         networkForActivation :: CustomRNG (Network, [V.Vector Float], [[[V.Vector Float]]], [[[V.Vector Float]]])
         networkForActivation = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
           hQ <- replicateM 6 (generateRandomVector 48)
           cK <- sequence [
             replicateM 6 (replicateM 6 (generateRandomVector 48)),
@@ -210,10 +223,10 @@ spec = do
             replicateM 3 (replicateM 6 (generateRandomVector 48))
             ]
           return (n, hQ, cK, cV)
-        indexLayer = 2
+        indexLayer = 2::Int
         (network, headsQ, cacheKey, cacheValue) = evalState networkForActivation 2
         headScoresExample = [0.5194815185588364, 0.48051848144116366]
-        activation = buildActivation headDimension indexLayer cacheValue 3 headScoresExample
+        activation = buildActivation headDim indexLayer cacheValue 3 headScoresExample
         
         expectedActivation = [0.3045971,0.28449363,0.48838997,0.26805186,0.7258309,0.5840917,
           0.678182,0.6833122,0.7507793,0.48202664,0.26566213,0.4568178,0.32925987,0.72464937,
@@ -262,7 +275,7 @@ spec = do
   describe "Delta FFN" $ do
     let 
       nVocab = 32000
-      headDimension = 48
+      headDim = 48
       nLayers = 6
       nSteps = 256
       hiddenDimension = 768
@@ -271,7 +284,7 @@ spec = do
       let
         networkForDeltaFFN :: CustomRNG (Network, V.Vector Float)
         networkForDeltaFFN = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector 288
           return (n, t)
         (network, token) = evalState networkForDeltaFFN 2
@@ -292,7 +305,7 @@ spec = do
       let
         networkForNewToken :: CustomRNG (Network, V.Vector Float, [[[V.Vector Float]]], [[[V.Vector Float]]])
         networkForNewToken = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension
+          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector 288
           cK <- sequence [
             replicateM 6 (replicateM 6 (generateRandomVector 48)),

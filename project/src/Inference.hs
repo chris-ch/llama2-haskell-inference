@@ -16,6 +16,7 @@ import qualified Data.Vector as V
 import qualified Data.Matrix as M
 
 import Control.Monad.State
+import System.IO (hFlush, stdout)
 import Control.Monad (replicateM, foldM)
 import Data.Binary.Get (runGet, getInt32le, getFloatle)
 import Text.Printf (printf)
@@ -88,7 +89,7 @@ readVectors nrows ncols = replicateM nrows (readVector ncols)
 readMatrix :: Int -> Int -> BG.Get (Matrix Float)
 readMatrix nrows ncols = do
     values <- replicateM (nrows * ncols) getFloatle
-    return $ M.fromLists (DLS.chunksOf nrows values)
+    return $ M.fromLists (DLS.chunksOf ncols values)
 
 readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
 readMatrices ndepth nrows ncols = replicateM ndepth (readMatrix nrows ncols)
@@ -109,9 +110,9 @@ initModel networkConfigFile = runGet (do
         wv <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         wo <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         rmsFfnWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
-        w1 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
-        w2 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
-        w3 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
+        w1 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
+        w2 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
+        w3 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
         rmsFinalWeight <- readVector (fromIntegral dim)
         freqCisReal <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
         freqCisImag <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
@@ -276,10 +277,7 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         valueNext = headVector V.! (headItemIndex + 1)
 
 matrixVectorMult :: (Num a) => Matrix a -> Vector a -> Vector a
-matrixVectorMult matrix vector = 
-    let result = M.getCol 1 $ M.multStd2 matrix (M.colVector vector)
-        traceMessage = "Matrix/Vector multiplication performed. Matrix: (" ++ show (M.nrows matrix) ++ " x " ++ show (M.ncols matrix) ++ "), Vector: " ++ show (V.length vector)
-    in traceStack traceMessage result
+matrixVectorMult matrix vector = M.getCol 1 $ M.multStd2 matrix (M.colVector vector)
 
 splitVector :: Int -> V.Vector a -> [V.Vector a]
 splitVector m vec = fmap V.fromList $ DLS.chunksOf ((V.length vec) `div` m) (V.toList vec)
@@ -359,7 +357,7 @@ transformer tokenCode stepCount network = do
     let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network)
 
     -- Classifier into logits
-    let logits = matrixVectorMult (M.transpose (tokenEmbeddingTable (weighting network))) tokenWithRms
+    let logits = matrixVectorMult (tokenEmbeddingTable (weighting network)) tokenWithRms
 
     return logits
 
@@ -385,6 +383,8 @@ generateTokens network checkedMaxSteps promptTokens temperature vocab = go 0 []
       | timestep >= checkedMaxSteps = return result
       | otherwise = do
         (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1
+        liftIO $ printf "%s " tokenStr
+        liftIO $ hFlush stdout
         go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
