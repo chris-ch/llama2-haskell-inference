@@ -4,10 +4,7 @@ import Test.Hspec
 import Inference
 import CustomRandom
 
-import qualified Data.Matrix.Unboxed as Mx
 import qualified Data.Vector.Unboxed as V
-import qualified Data.Binary.Get as BG
-import qualified Data.Binary.Put as BP
 import Control.Monad.State
 import Control.Monad (replicateM)
 
@@ -258,7 +255,7 @@ spec = do
         cacheKey' = keyCache (runCache')
         cacheValue' = valueCache (runCache')
         activations = multiheadActivation network indexLayer cacheKey' cacheValue' q
-        deltaTokenQKV = matrixVectorMult ((wo (weighting network)) !! indexLayer) (reshapeMatrixToVector activations)
+        deltaTokenQKV = matrixVectorMult ((wo (weighting network)) !! indexLayer) (V.concat activations)
 
       shouldBeSmall 1.0 $ (V.sum deltaTokenQKV) - 2897446.0276938234
       shouldBeSmall 1.0 $ (V.maximum deltaTokenQKV) - 10245.32163638757

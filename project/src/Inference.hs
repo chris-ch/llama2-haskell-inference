@@ -68,10 +68,8 @@ readVector count = do
 readVectors :: Int -> Int -> BG.Get [Vector Float]
 readVectors nrows ncols = replicateM nrows (readVector ncols)
 
-readMatrix = readVectors
-
 readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
-readMatrices ndepth nrows ncols = replicateM ndepth (readMatrix nrows ncols)
+readMatrices ndepth nrows ncols = replicateM ndepth (readVectors nrows ncols)
 
 initModel :: BSL.ByteString -> Network
 initModel networkConfigFile = runGet (do
@@ -82,7 +80,7 @@ initModel networkConfigFile = runGet (do
         numKeyValueHeads <- getInt32le
         vocabSize <- getInt32le
         seqLen <- getInt32le
-        tokenEmbeddingTable <- readMatrix (fromIntegral vocabSize) (fromIntegral dim)
+        tokenEmbeddingTable <- readVectors (fromIntegral vocabSize) (fromIntegral dim)
         rmsAttWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
         wq <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
         wk <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
@@ -256,7 +254,8 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         valueNext = headVector V.! (headItemIndex + 1)
 
 matrixVectorMult :: Matrix Float -> Vector Float -> Vector Float
-matrixVectorMult mat vec = V.fromList [ (V.sum . V.zipWith (*) vec) row | row <- mat ]
+--matrixVectorMult mat vec = V.fromList [ (V.sum . V.zipWith (*) vec) row | row <- mat ]
+matrixVectorMult mat vec = V.fromList $ map (\v -> dotProduct v vec) mat
 
 splitVector :: Int -> Vector Float -> [Vector Float]
 splitVector m vec = fmap V.fromList $ DLS.chunksOf ((V.length vec) `div` m) (V.toList vec)
@@ -264,18 +263,18 @@ splitVector m vec = fmap V.fromList $ DLS.chunksOf ((V.length vec) `div` m) (V.t
 dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ elementsProduct vec1 vec2
 
-elementsProduct:: Vector Float -> Vector Float -> Vector Float
+elementsProduct :: Vector Float -> Vector Float -> Vector Float
 elementsProduct vec1 vec2 = V.zipWith (*) vec1 vec2
 
-vectorSum:: Vector Float -> Vector Float -> Vector Float
-vectorSum vec1 vec2 = V.zipWith (+) vec1 vec2
-
-reshapeMatrixToVector :: Matrix Float -> Vector Float
-reshapeMatrixToVector = V.concat
+squareNorm :: Vector Float -> Float
+squareNorm vec = V.foldl sumSquare 0.0 vec
+  where
+    sumSquare :: Float -> Float -> Float
+    sumSquare acc v = acc + (v ^ (2::Int))
 
 rmsNorm :: Vector Float -> Vector Float -> Vector Float
 rmsNorm vector weights =
-  let ss = ((dotProduct vector vector) / fromIntegral (V.length vector)) + 1e-5
+  let ss = ((squareNorm vector) / fromIntegral (V.length vector)) + 1e-5
       normalized = V.map (* (1.0 / sqrt ss)) vector
   in elementsProduct weights normalized
 
@@ -311,7 +310,7 @@ createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow toke
         valueCache' = replaceAtIndex stepCount valueCacheStep valueCache
         activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
-        deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (reshapeMatrixToVector activations)
+        deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations)
         token' = V.zipWith (+) token deltaTokenQKV
         deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token'
         result = V.zipWith (+) token' deltaTokenFFN
