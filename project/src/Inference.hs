@@ -194,11 +194,11 @@ generateNextToken timestep promptTokens temperature network vocab tokenCode seed
           else vocab !! nextToken
   return (tokenStr, nextToken)
 
-generateTokens :: Network -> Int -> [Int] -> Float -> [Text] -> Int -> StateT RunCache IO [Text]
+generateTokens :: Network -> Int -> [Int] -> Float -> [Text] -> Int -> StateT RunCache IO ([Text], Int)
 generateTokens network checkedMaxSteps promptTokens temperature vocab seedValue = go 0 [] 1
   where
     go timestep result token
-      | timestep >= checkedMaxSteps || (timestep /= 0 && token == 1) = return result
+      | timestep >= checkedMaxSteps || (timestep /= 0 && token == 1) = return (result, timestep)
       | otherwise = do
         (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
         put (RunCache {keyCache = take timestep kC ++ [[]], valueCache = take timestep vC ++ [[]]})
@@ -211,7 +211,7 @@ run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   currentTime <- getPOSIXTime
   let
-    seedValue = fromMaybe (round currentTime) seed -- Provide a default value if seed is Nothing
+    seedValue = fromMaybe (round currentTime) seed
     network = initModel modelFileContent
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
@@ -222,6 +222,13 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   printf "initial sentence: %s\n" $ show $ map (\token -> vocab !! token) promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
   putStrLn "<s>"
-  _ <- evalStateT (generateTokens network steps promptTokens temperature vocab seedValue) initCache
+  startTime <- getPOSIXTime
+  (_, countTokens) <- evalStateT (generateTokens network steps promptTokens temperature vocab seedValue) initCache
+  endTime <- getPOSIXTime
+  let
+    duration :: Integer
+    duration = round (endTime - startTime)
+    tokensPerSec :: Float
+    tokensPerSec = fromIntegral countTokens / fromIntegral duration
+  printf "duration: %ds - (%.02f tokens/s)\n" duration tokensPerSec
   return ()
-
