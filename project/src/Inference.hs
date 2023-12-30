@@ -197,15 +197,15 @@ generateNextToken timestep promptTokens temperature network vocab tokenCode = do
   return (tokenStr, nextToken)
 
 generateTokens :: Network -> Int -> [Int] -> Float -> [Text] -> StateT RunCache IO [Text]
-generateTokens network checkedMaxSteps promptTokens temperature vocab = go 0 []
+generateTokens network checkedMaxSteps promptTokens temperature vocab = go 0 [] 1
   where
-    go timestep result
+    go timestep result token
       | timestep >= checkedMaxSteps = return result
       | otherwise = do
-        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab 1
-        liftIO $ printf "%s " tokenStr
+        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab token
+        liftIO $ printf "%s" tokenStr
         liftIO $ hFlush stdout
-        go (timestep + 1) (result ++ [tokenStr | nextToken /= 1])
+        go (timestep + 1) (result ++ [tokenStr | nextToken /= 1]) nextToken
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
