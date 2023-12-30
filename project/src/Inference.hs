@@ -13,9 +13,7 @@ import qualified Data.List as DL
 import qualified Data.List.Split as DLS
 import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
-import qualified Data.Matrix.Unboxed as M
 
-import Linear
 import Control.Monad.State
 import System.IO (hFlush, stdout)
 import Control.Monad (replicateM, foldM)
@@ -24,9 +22,10 @@ import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Vector.Unboxed (Vector)
-import Data.Matrix.Unboxed (Matrix)
 
 import Debug.Trace
+
+type Matrix a = [Vector a] -- Matrix as row vectors
 
 data RunCache = RunCache
     { keyCache :: [[[Vector Float]]]
@@ -69,10 +68,7 @@ readVector count = do
 readVectors :: Int -> Int -> BG.Get [Vector Float]
 readVectors nrows ncols = replicateM nrows (readVector ncols)
 
-readMatrix :: Int -> Int -> BG.Get (Matrix Float)
-readMatrix nrows ncols = do
-    values <- replicateM (nrows * ncols) getFloatle
-    return $ M.fromLists (DLS.chunksOf ncols values)
+readMatrix = readVectors
 
 readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
 readMatrices ndepth nrows ncols = replicateM ndepth (readMatrix nrows ncols)
@@ -184,7 +180,7 @@ bpeEncode prompt vocab vocabScores =
   let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
   in processTokens tokens vocab vocabScores
 
-argmax :: (V.Unbox a, Ord a) => V.Vector a -> Int
+argmax :: (V.Unbox a, Ord a) => Vector a -> Int
 argmax = V.maxIndex
 
 softmax :: Vector Float -> Int -> Vector Float
@@ -220,15 +216,13 @@ computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
 
 multiheadActivation :: Network -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
 multiheadActivation network indexLayer keyCache valueCache headsQ = 
-    fromVectors [buildActivation (headDimension network) indexLayer valueCache indexHead (scores indexHead)
+    [buildActivation (headDimension network) indexLayer valueCache indexHead (scores indexHead)
                     | indexHead <- [0 .. numAttentionHeads network - 1]]
     where
       hd = headDimension network
       scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
         where
           rawScores = computeScores hd keyCache indexLayer indexHead headsQ
-      fromVectors :: [Vector Float] -> Matrix Float
-      fromVectors vectorList = M.fromLists $ map V.toList vectorList
 
 buildActivation :: Int -> Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
 buildActivation dimension indexLayer valueCache indexHead headScores =
@@ -262,22 +256,22 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         valueNext = headVector V.! (headItemIndex + 1)
 
 matrixVectorMult :: Matrix Float -> Vector Float -> Vector Float
-matrixVectorMult mat vec = V.fromList [ (V.sum . V.zipWith (*) vec) row | row <- M.toRows mat ]
+matrixVectorMult mat vec = V.fromList [ (V.sum . V.zipWith (*) vec) row | row <- mat ]
 
-splitVector :: Int -> V.Vector Float -> [V.Vector Float]
+splitVector :: Int -> Vector Float -> [Vector Float]
 splitVector m vec = fmap V.fromList $ DLS.chunksOf ((V.length vec) `div` m) (V.toList vec)
 
-dotProduct :: V.Vector Float -> V.Vector Float -> Float
+dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ elementsProduct vec1 vec2
 
-elementsProduct:: V.Vector Float -> V.Vector Float -> V.Vector Float
+elementsProduct:: Vector Float -> Vector Float -> Vector Float
 elementsProduct vec1 vec2 = V.zipWith (*) vec1 vec2
 
-vectorSum:: V.Vector Float -> V.Vector Float -> V.Vector Float
+vectorSum:: Vector Float -> Vector Float -> Vector Float
 vectorSum vec1 vec2 = V.zipWith (+) vec1 vec2
 
-reshapeMatrixToVector :: Matrix Float -> V.Vector Float
-reshapeMatrixToVector = V.fromList . M.toList
+reshapeMatrixToVector :: Matrix Float -> Vector Float
+reshapeMatrixToVector = V.concat
 
 rmsNorm :: Vector Float -> Vector Float -> Vector Float
 rmsNorm vector weights =
@@ -327,7 +321,7 @@ createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow toke
 transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
 transformer tokenCode stepCount network = do
     -- Getting the token embedding
-    let token = M.takeRow (tokenEmbeddingTable (weighting network)) tokenCode
+    let token = (tokenEmbeddingTable (weighting network)) !! tokenCode
 
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
     let freqCisRealRow = freqCisReal (weighting network) !! stepCount

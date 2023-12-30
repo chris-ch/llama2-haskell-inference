@@ -1,9 +1,7 @@
 module CustomRandom where
 
 import Data.Vector.Unboxed
-import Data.Matrix.Unboxed
 import qualified Data.Vector.Unboxed as V
-import qualified Data.Matrix.Unboxed as Mx
 import Control.Monad.State
 import Control.Monad
 import qualified Control.Monad as M
@@ -57,8 +55,7 @@ generateRandomVector size = fmap V.fromList $ M.replicateM size nextRandomValue
 generateRandomVectors :: Int -> Int -> CustomRNG [Vector Float]
 generateRandomVectors count size = M.replicateM count (generateRandomVector size)
 
-generateRandomMatrix :: Int -> Int -> CustomRNG (Matrix Float)
-generateRandomMatrix nrows ncols = fmap Mx.fromLists $ generateRandomArrays nrows ncols
+generateRandomMatrix = generateRandomVectors
 
 generateRandomMatrices :: Int -> Int -> Int -> CustomRNG [Matrix Float]
 generateRandomMatrices count nrows ncols = M.replicateM count (generateRandomMatrix nrows ncols)

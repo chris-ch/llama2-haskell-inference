@@ -17,7 +17,7 @@ stack run -- cli-app --model-file data/stories15M.bin --temperature 0.8 --steps 
 For testing purposes, you can set the _seed_ option to some value to always get the same output:
 
 ```shell
-stack run -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town" +RTS -p
+stack run -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town"
 ```
 
 Generated output for that particular seed:

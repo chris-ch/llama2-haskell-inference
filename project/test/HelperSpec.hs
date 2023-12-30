@@ -4,7 +4,6 @@ import Test.Hspec
 import Inference
 import CustomRandom
 
-import qualified Data.Matrix.Unboxed as Mx
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Binary.Get as BG
 import qualified Data.Binary.Put as BP
@@ -21,7 +20,7 @@ spec = do
       replaceAtIndex 2 0.5 ([1.0, 2.0, 3.0]::[Float]) `shouldBe` ([1.0, 2.0, 0.5]::[Float])
 
     it "reshapes matrix as vector" $ do
-      reshapeMatrixToVector (Mx.fromLists [
+      reshapeMatrixToVector (fmap V.fromList [
             [0.047, 0.453, 0.653, 0.577],
              [0.022, 0.253, 0.432, 0.524],
              [0.114, 0.917, 0.747, 0.164]
@@ -29,15 +28,15 @@ spec = do
 
     it "reads a 2x3 matrix from a ByteString" $ do
         let inputBytes = BP.runPut $ mapM_ BP.putFloatle [1.0, 2.0, 3.0, 4.0, -1.0, -2.0]
-            expectedMatrix :: Mx.Matrix Float
-            expectedMatrix = Mx.fromLists [[1.0, 2.0, 3.0], [4.0, -1.0, -2.0]]
+            expectedMatrix :: Matrix Float
+            expectedMatrix = fmap V.fromList [[1.0, 2.0, 3.0], [4.0, -1.0, -2.0]]
             actualMatrix = BG.runGet (readMatrix 2 3) inputBytes
         actualMatrix `shouldBe` expectedMatrix
 
     it "reads a 3x2 matrix from a ByteString" $ do
         let inputBytes = BP.runPut $ mapM_ BP.putFloatle [1.0, 2.0, 3.0, 4.0, -1.0, -2.0]
-            expectedMatrix :: Mx.Matrix Float
-            expectedMatrix = Mx.fromLists [[1.0, 2.0], [3.0, 4.0], [-1.0, -2.0]]
+            expectedMatrix :: Matrix Float
+            expectedMatrix = fmap V.fromList [[1.0, 2.0], [3.0, 4.0], [-1.0, -2.0]]
             actualMatrix = BG.runGet (readMatrix 3 2) inputBytes
         actualMatrix `shouldBe` expectedMatrix
 
@@ -86,5 +85,5 @@ spec = do
     
     it "generates custom random matrix" $ do
       let result = evalState (generateRandomMatrix 3 4) 2
-      (Mx.rows result) `shouldBe` 3
-      (Mx.cols result) `shouldBe` 4
+      (length result) `shouldBe` 3
+      (V.length (result !! 0)) `shouldBe` 4
