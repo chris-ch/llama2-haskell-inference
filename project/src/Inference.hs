@@ -32,11 +32,11 @@ softmax values size = V.concat [softmaxValues, V.slice size (V.length values - s
     softmaxValues = V.map (\x -> x / sumExpValues) expValues
 
 indexHighestCDF :: Float -> Vector Float -> Int
-indexHighestCDF r vec = V.ifoldl' (indexHighest r) 0 cdf
+indexHighestCDF r vec = min (V.ifoldl' (indexHighest r) 0 cdf) (V.length vec - 1)
     where
       cdf = V.scanl1 (+) vec
       indexHighest :: Float -> Int -> Int -> Float -> Int
-      indexHighest rand acc i v = if v < rand then i else acc
+      indexHighest rand acc i v = if v <= rand then i + 1 else acc
 
 drawSample :: Vector Float -> IO Int
 drawSample probabilities = do
