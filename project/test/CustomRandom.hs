@@ -3,10 +3,9 @@ module CustomRandom where
 import Data.Vector.Unboxed
 import qualified Data.Vector.Unboxed as V
 import Control.Monad.State
-import Control.Monad
 import qualified Control.Monad as M
 import Data.Bits
-import Inference
+import Builder
 
 -- Define the state type
 type StateRNG = Int
@@ -55,15 +54,13 @@ generateRandomVector size = fmap V.fromList $ M.replicateM size nextRandomValue
 generateRandomVectors :: Int -> Int -> CustomRNG [Vector Float]
 generateRandomVectors count size = M.replicateM count (generateRandomVector size)
 
-generateRandomMatrix = generateRandomVectors
-
 generateRandomMatrices :: Int -> Int -> Int -> CustomRNG [Matrix Float]
-generateRandomMatrices count nrows ncols = M.replicateM count (generateRandomMatrix nrows ncols)
+generateRandomMatrices count nrows ncols = M.replicateM count (generateRandomVectors nrows ncols)
 
 buildRandomNetwork :: Int -> Int -> Int -> Int -> Int -> CustomRNG Network
 buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension = do
     let dimension = headDimension * nLayers
-    tokenEmbeddingTable <- generateRandomMatrix nVocab dimension
+    tokenEmbeddingTable <- generateRandomVectors nVocab dimension
     attentionWeights <- generateRandomVectors nLayers dimension
     queryWeights <- generateRandomMatrices nLayers dimension dimension
     keyWeights <- generateRandomMatrices nLayers dimension dimension
@@ -76,7 +73,7 @@ buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension = do
     finalWeights <- generateRandomVector dimension
     freqCisReal <- generateRandomVectors nSteps (headDimension `div` 2)
     freqCisImag <- generateRandomVectors nSteps (headDimension `div` 2)
-    return Network { Inference.dim = dimension,
+    return Network { dim = dimension,
         headDimension = headDimension,
         hiddenDim = hiddenDimension,
         nLayers = nLayers,

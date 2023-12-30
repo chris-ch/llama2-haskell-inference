@@ -5,8 +5,6 @@
 module Inference where
 
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.Binary.Get as BG
-import qualified Data.Text.Encoding as TE
 import qualified Data.Text as T
 import qualified Data.Char as C
 import qualified Data.List as DL
@@ -14,172 +12,16 @@ import qualified Data.List.Split as DLS
 import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
 
+import Builder (Network(..), RunCache(..),
+  Matrix, TransformerWeighting(..),
+  initModel, tokenizerInit, bpeEncode)
 import Control.Monad.State
 import System.IO (hFlush, stdout)
-import Control.Monad (replicateM, foldM)
-import Data.Binary.Get (runGet, getInt32le, getFloatle)
+import Control.Monad (foldM)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Vector.Unboxed (Vector)
-
-import Debug.Trace
-
-type Matrix a = [Vector a] -- Matrix as row vectors
-
-data RunCache = RunCache
-    { keyCache :: [[[Vector Float]]]
-    , valueCache :: [[[Vector Float]]]
-    } deriving (Show)
-
-data TransformerWeighting = TransformerWeighting
-    { tokenEmbeddingTable :: Matrix Float
-    , rmsAttWeight :: [Vector Float]
-    , wq :: [Matrix Float]
-    , wk :: [Matrix Float]
-    , wv :: [Matrix Float]
-    , wo :: [Matrix Float]
-    , rmsFfnWeight :: [Vector Float]
-    , w1 :: [Matrix Float]
-    , w3 :: [Matrix Float]
-    , w2 :: [Matrix Float]
-    , rmsFinalWeight :: Vector Float
-    , freqCisReal :: [Vector Float]
-    , freqCisImag :: [Vector Float]
-    } deriving (Show)
-
-data Network = Network
-    { dim :: Int
-    , hiddenDim :: Int
-    , nLayers :: Int
-    , numAttentionHeads :: Int
-    , numKeyValueHeads :: Int
-    , vocabSize :: Int
-    , seqLen :: Int
-    , headDimension :: Int
-    , weighting :: TransformerWeighting
-    } deriving (Show)
-
-readVector :: Int -> BG.Get (Vector Float)
-readVector count = do
-    values <- replicateM count getFloatle
-    return $ V.fromList values
-
-readVectors :: Int -> Int -> BG.Get [Vector Float]
-readVectors nrows ncols = replicateM nrows (readVector ncols)
-
-readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
-readMatrices ndepth nrows ncols = replicateM ndepth (readVectors nrows ncols)
-
-initModel :: BSL.ByteString -> Network
-initModel networkConfigFile = runGet (do
-        dim <- getInt32le
-        hiddenDim <- getInt32le
-        nLayers <- getInt32le
-        numAttentionHeads <- getInt32le
-        numKeyValueHeads <- getInt32le
-        vocabSize <- getInt32le
-        seqLen <- getInt32le
-        tokenEmbeddingTable <- readVectors (fromIntegral vocabSize) (fromIntegral dim)
-        rmsAttWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
-        wq <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        wk <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        wv <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        wo <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        rmsFfnWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
-        w1 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
-        w2 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
-        w3 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
-        rmsFinalWeight <- readVector (fromIntegral dim)
-        freqCisReal <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
-        freqCisImag <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
-
-        let
-            headDimension = dim `div` numAttentionHeads
-            weighting = TransformerWeighting
-              { tokenEmbeddingTable = tokenEmbeddingTable
-              , rmsAttWeight = rmsAttWeight
-              , wq = wq
-              , wk = wk
-              , wv = wv
-              , wo = wo
-              , rmsFfnWeight = rmsFfnWeight
-              , w1 = w1
-              , w2 = w2
-              , w3 = w3
-              , rmsFinalWeight = rmsFinalWeight
-              , freqCisReal = freqCisReal
-              , freqCisImag = freqCisImag
-              }
-        return $ Network
-            { dim = fromIntegral dim
-            , hiddenDim = fromIntegral hiddenDim
-            , nLayers = fromIntegral nLayers
-            , numAttentionHeads = fromIntegral numAttentionHeads
-            , numKeyValueHeads = fromIntegral numKeyValueHeads
-            , vocabSize = abs (fromIntegral vocabSize)
-            , seqLen = fromIntegral seqLen
-            , headDimension = fromIntegral headDimension
-            , weighting = weighting
-            }
-        ) networkConfigFile
-
-parseTokens :: BSL.ByteString -> Int -> ([T.Text], [Float])
-parseTokens file size = (vocab, vocabScores)
-  where
-    readToken :: BG.Get (Float, T.Text)
-    readToken = do
-      score <- BG.getFloatle
-      tokenSize <- BG.getInt32le
-      bstr <- TE.decodeUtf8 . BSL.toStrict <$> BG.getLazyByteString (fromIntegral tokenSize)
-      return (score, bstr)
-
-    scoresAndStrings :: BG.Get [(Float, T.Text)]
-    scoresAndStrings = replicateM size readToken
-
-    vocabScores = fst <$> BG.runGet scoresAndStrings file
-    vocab = snd <$> BG.runGet scoresAndStrings file
-
-tokenizerInit :: BSL.ByteString -> Int -> ([T.Text], [Float])
-tokenizerInit file size = parseTokens (BSL.drop 4 file) size
-
-strLookup :: Text -> [T.Text] -> Int
-strLookup occurrence = fromMaybe (-1) . DL.findIndex (occurrence ==)
-
-processTokens :: [Int] -> [T.Text] -> [Float] -> [Int]
-processTokens tokens vocab vocabScores = process tokens
-  where
-    process :: [Int] -> [Int]
-    process tokens' =
-      case findBestPair tokens' of
-        Just (bestIdx, bestId) ->
-          process (mergePair bestIdx bestId tokens')
-        Nothing ->
-          tokens'
-
-    findBestPair :: [Int] -> Maybe (Int, Int)
-    findBestPair tokens' = foldr checkPair Nothing (zip [0..] (zip tokens' (drop 1 tokens')))
-      where
-        checkPair :: (Int, (Int, Int)) -> Maybe (Int, Int) -> Maybe (Int, Int)
-        checkPair (count, (tokenPrev, tokenNext)) acc =
-          case strLookup ((vocab !! tokenPrev) `T.append` (vocab !! tokenNext)) vocab of
-            pos | pos /= -1 && vocabScores !! pos > bestScore -> Just (count, pos)
-            _ -> acc
-
-        bestScore :: Float
-        bestScore = -1e10
-
-    mergePair :: Int -> Int -> [Int] -> [Int]
-    mergePair idx code tokens' =
-      take idx tokens' ++ [code] ++ drop (idx + 2) tokens'
-
-bpeEncode :: T.Text -> [T.Text] -> [Float] -> [Int]
-bpeEncode prompt vocab vocabScores =
-  let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
-  in processTokens tokens vocab vocabScores
-
-argmax :: (V.Unbox a, Ord a) => Vector a -> Int
-argmax = V.maxIndex
 
 softmax :: Vector Float -> Int -> Vector Float
 softmax values size = V.concat [softmaxValues, V.slice size (V.length values - size) values]
@@ -200,7 +42,7 @@ drawSample probabilities = do
       | otherwise = go ps r (acc + 1)
     go _ _ acc = acc
 
-computeQKV :: Network -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
+computeQKV :: Builder.Network -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
 computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
@@ -345,7 +187,7 @@ generateNextToken timestep promptTokens temperature network vocab tokenCode = do
   nextToken <- if timestep < length promptTokens
     then return (promptTokens !! timestep)
     else if temperature == 0.0
-      then return (argmax logits)
+      then return (V.maxIndex logits)
     else do
       liftIO $ drawSample $ softmax (V.map (/ temperature) logits) (vocabSize network)
   let tokenStr =
@@ -373,6 +215,7 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     --weighting = checkpointInitWeights network modelFileContent
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
+    initCache :: RunCache
     initCache = RunCache { keyCache = [], valueCache = [] }
   textList <- evalStateT (generateTokens network steps promptTokens temperature vocab) initCache
   printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)

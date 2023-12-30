@@ -1,6 +1,7 @@
 module HelperSpec (spec) where
 
 import Test.Hspec
+import Builder
 import Inference
 import CustomRandom
 
@@ -83,6 +84,6 @@ spec = do
       vector2 `shouldBe` (V.fromList [0.022, 0.253, 0.432, 0.524])
     
     it "generates custom random matrix" $ do
-      let result = evalState (generateRandomMatrix 3 4) 2
+      let result = evalState (generateRandomVectors 3 4) 2
       (length result) `shouldBe` 3
       (V.length (result !! 0)) `shouldBe` 4

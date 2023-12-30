@@ -3,7 +3,6 @@ module Main (main) where
 
 import Options.Applicative
 import System.IO
-import Data.Binary.Get (runGet, getLazyByteString)
 import qualified Data.ByteString.Lazy as BSL
 import Inference (run)
 import System.Directory

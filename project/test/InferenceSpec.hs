@@ -1,6 +1,7 @@
 module InferenceSpec (spec) where
 
 import Test.Hspec
+import Builder
 import Inference
 import CustomRandom
 
