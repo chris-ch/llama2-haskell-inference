@@ -33,6 +33,7 @@ dependencies:
   - vector
   - split
   - mtl
+  - time
 
 ghc-options:
   - -Wall

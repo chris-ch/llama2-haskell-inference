@@ -22,6 +22,7 @@ import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Vector.Unboxed (Vector)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
 softmax :: Vector Float -> Int -> Vector Float
 softmax values size = V.concat [softmaxValues, V.slice size (V.length values - size) values]
@@ -208,10 +209,10 @@ generateTokens network checkedMaxSteps promptTokens temperature vocab seedValue 
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
+  currentTime <- getPOSIXTime
   let
-    seedValue = fromMaybe 0 seed -- Provide a default value if seed is Nothing
+    seedValue = fromMaybe (round currentTime) seed -- Provide a default value if seed is Nothing
     network = initModel modelFileContent
-    --weighting = checkpointInitWeights network modelFileContent
     (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
     initCache :: RunCache
