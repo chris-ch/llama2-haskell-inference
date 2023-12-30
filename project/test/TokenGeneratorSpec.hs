@@ -47,3 +47,6 @@ spec = do
 
       (V.take 5 logits) `shouldBe` V.fromList [76.487885,75.86574,69.82333,73.169655,72.23714]
       (V.take 5 (V.drop 31995 logits)) `shouldBe` V.fromList [81.34005,77.39803,78.24066,82.83305,75.38994]
+
+      let next_token = indexHighestCDF 0.4 $ softmax (V.map (/ 0.8) logits) (vocabSize network)
+      next_token `shouldBe` 12854

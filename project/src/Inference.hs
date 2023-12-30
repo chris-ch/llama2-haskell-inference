@@ -38,9 +38,10 @@ indexHighestCDF r vec = min (V.ifoldl' (indexHighest r) 0 cdf) (V.length vec - 1
       indexHighest :: Float -> Int -> Int -> Float -> Int
       indexHighest rand acc i v = if v <= rand then i + 1 else acc
 
-drawSample :: Vector Float -> IO Int
-drawSample probabilities = do
-  r <- R.randomIO :: IO Float
+drawSample :: Int -> Vector Float -> IO Int
+drawSample seedValue probabilities = do
+  let gen = R.mkStdGen seedValue
+  let (r, _) = R.random gen :: (Float, R.StdGen)
   return $ indexHighestCDF r probabilities
 
 computeQKV :: Builder.Network -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
@@ -137,27 +138,22 @@ computeDeltaFFN weighting indexLayer token =
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
     in matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
 
-replaceAtIndex :: Int -> a -> [a] -> [a]
-replaceAtIndex index newValue list
-  | index < 0 || index >= length list = list
-  | otherwise = take index list ++ [newValue] ++ drop (index + 1) list
-
 createLayerToken :: Network -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> StateT RunCache IO (Vector Float)
 createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow token = do
-    (keyCache, valueCache) <- gets (\cache -> (keyCache cache, valueCache cache))
+    (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
     let
         (headsQ, headsK, headsV) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
-        keyCacheStep = (keyCache !! stepCount) ++ [headsK]
-        valueCacheStep = (valueCache !! stepCount) ++ [headsV]
-        keyCache' = replaceAtIndex stepCount keyCacheStep keyCache
-        valueCache' = replaceAtIndex stepCount valueCacheStep valueCache
+        keyCacheStep = (kC !! stepCount) ++ [headsK]
+        valueCacheStep = (vC !! stepCount) ++ [headsV]
+        keyCache' = take stepCount kC ++ [keyCacheStep]
+        valueCache' = take stepCount vC ++ [valueCacheStep]
         activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations)
         token' = V.zipWith (+) token deltaTokenQKV
         deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token'
         result = V.zipWith (+) token' deltaTokenFFN
-    put (RunCache keyCache' valueCache')
+    put (RunCache {keyCache = keyCache', valueCache = valueCache'})
     return result
 
 transformer :: Int -> Int -> Network -> StateT RunCache IO (Vector Float)
@@ -182,31 +178,33 @@ transformer tokenCode stepCount network = do
 
     return logits
 
-generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> StateT RunCache IO (Text, Int)
-generateNextToken timestep promptTokens temperature network vocab tokenCode = do
+generateNextToken :: Int -> [Int] -> Float -> Network -> [Text] -> Int -> Int -> StateT RunCache IO (Text, Int)
+generateNextToken timestep promptTokens temperature network vocab tokenCode seedValue = do
   logits <- transformer tokenCode timestep network
   nextToken <- if timestep < length promptTokens
     then return (promptTokens !! timestep)
     else if temperature == 0.0
       then return (V.maxIndex logits)
     else do
-      liftIO $ drawSample $ softmax (V.map (/ temperature) logits) (vocabSize network)
+      liftIO $ drawSample seedValue $ softmax (V.map (/ temperature) logits) (vocabSize network)
   let tokenStr =
         if tokenCode == 1 && C.isSpace (T.head (vocab !! nextToken))
           then T.tail (vocab !! nextToken)
           else vocab !! nextToken
   return (tokenStr, nextToken)
 
-generateTokens :: Network -> Int -> [Int] -> Float -> [Text] -> StateT RunCache IO [Text]
-generateTokens network checkedMaxSteps promptTokens temperature vocab = go 0 [] 1
+generateTokens :: Network -> Int -> [Int] -> Float -> [Text] -> Int -> StateT RunCache IO [Text]
+generateTokens network checkedMaxSteps promptTokens temperature vocab seedValue = go 0 [] 1
   where
     go timestep result token
-      | timestep >= checkedMaxSteps = return result
+      | timestep >= checkedMaxSteps || (timestep /= 0 && token == 1) = return result
       | otherwise = do
-        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab token
+        (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
+        put (RunCache {keyCache = take timestep kC ++ [[]], valueCache = take timestep vC ++ [[]]})
+        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab token seedValue
         liftIO $ printf "%s" tokenStr
         liftIO $ hFlush stdout
-        go (timestep + 1) (result ++ [tokenStr | nextToken /= 1]) nextToken
+        go (timestep + 1) (result ++ [tokenStr]) nextToken
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
@@ -218,9 +216,11 @@ run modelFileContent tokenizerFileContent temperature steps prompt seed = do
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
     initCache :: RunCache
     initCache = RunCache { keyCache = [], valueCache = [] }
-  textList <- evalStateT (generateTokens network steps promptTokens temperature vocab) initCache
   printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
   printf "prompt tokens: %s\n" $ show promptTokens
   printf "initial sentence: %s\n" $ show $ map (\token -> vocab !! token) promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
-  putStrLn $ T.unpack $ T.intercalate (T.pack " ") textList
+  putStrLn "<s>"
+  _ <- evalStateT (generateTokens network steps promptTokens temperature vocab seedValue) initCache
+  return ()
+
