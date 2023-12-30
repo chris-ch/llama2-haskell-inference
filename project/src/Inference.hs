@@ -31,16 +31,17 @@ softmax values size = V.concat [softmaxValues, V.slice size (V.length values - s
     sumExpValues = V.sum expValues
     softmaxValues = V.map (\x -> x / sumExpValues) expValues
 
+indexHighestCDF :: Float -> Vector Float -> Int
+indexHighestCDF r vec = V.ifoldl' (indexHighest r) 0 cdf
+    where
+      cdf = V.scanl1 (+) vec
+      indexHighest :: Float -> Int -> Int -> Float -> Int
+      indexHighest rand acc i v = if v < rand then i else acc
+
 drawSample :: Vector Float -> IO Int
 drawSample probabilities = do
   r <- R.randomIO :: IO Float
-  let cdf = DL.scanl1 (+) (V.toList probabilities)
-  return $ go cdf r 0
-  where
-    go (p:ps) r acc
-      | r < p = acc
-      | otherwise = go ps r (acc + 1)
-    go _ _ acc = acc
+  return $ indexHighestCDF r probabilities
 
 computeQKV :: Builder.Network -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
 computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
