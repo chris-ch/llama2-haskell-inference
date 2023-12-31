@@ -15,8 +15,7 @@ import qualified Data.Vector.Unboxed as V
 import Builder (NetworkConfig(..), AttentionKV(..),
   Matrix, TransformerWeighting(..),
   initModel, tokenizerInit, bpeEncode)
-import Control.Monad.State
-    ( StateT, MonadIO(liftIO), evalStateT, MonadState(put), gets )
+import Control.Monad.State ( StateT, evalStateT, MonadState(put), gets )
 import System.IO (hFlush, stdout)
 import Control.Monad (foldM)
 import Text.Printf (printf)
@@ -24,6 +23,10 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Vector.Unboxed (Vector)
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import Control.Monad.Reader
+    ( MonadIO(liftIO),
+      ReaderT(runReaderT),
+      MonadReader(ask) )
 
 softmax :: Vector Float -> Int -> Vector Float
 softmax values size = V.concat [softmaxValues, V.slice size (V.length values - size) values]
@@ -140,8 +143,9 @@ computeDeltaFFN weighting indexLayer token =
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
     in matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
 
-createLayerToken :: NetworkConfig -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> StateT AttentionKV IO (Vector Float)
-createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow token = do
+createLayerToken :: Int -> Int -> Vector Float -> Vector Float -> Vector Float -> ReaderT NetworkConfig (StateT AttentionKV IO) (Vector Float)
+createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
+    network <- ask
     (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
     let
         (headsQ, headsK, headsV) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
@@ -150,6 +154,7 @@ createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow toke
         keyCache' = take stepCount kC ++ [keyCacheStep]
         valueCache' = take stepCount vC ++ [valueCacheStep]
         activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
+    let
         wO = wo (weighting network)
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations)
         token' = V.zipWith (+) token deltaTokenQKV
@@ -158,8 +163,10 @@ createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow toke
     put (AttentionKV {keyCache = keyCache', valueCache = valueCache'})
     return result
 
-transformer :: Int -> Int -> NetworkConfig -> StateT AttentionKV IO (Vector Float)
-transformer tokenCode stepCount network = do
+transformer :: Int -> Int -> ReaderT NetworkConfig (StateT AttentionKV IO) (Vector Float)
+transformer tokenCode stepCount = do
+    network <- ask
+
     -- Getting the token embedding
     let token = tokenEmbeddingTable (weighting network) !! tokenCode
 
@@ -168,7 +175,7 @@ transformer tokenCode stepCount network = do
     let freqCisImagRow = freqCisImag (weighting network) !! stepCount
 
     -- Forwarding all the layers
-    finalToken <- foldM (\accToken indexLayer -> createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow accToken)
+    finalToken <- foldM (\accToken indexLayer -> createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow accToken)
                   token
                   [0..nLayers network - 1]
 
@@ -180,9 +187,10 @@ transformer tokenCode stepCount network = do
 
     return logits
 
-generateNextToken :: Int -> [Int] -> Float -> NetworkConfig -> [Text] -> Int -> Int -> StateT AttentionKV IO (Text, Int)
-generateNextToken timestep promptTokens temperature network vocab tokenCode seedValue = do
-  logits <- transformer tokenCode timestep network
+generateNextToken :: Int -> [Int] -> Float -> [Text] -> Int -> Int -> ReaderT NetworkConfig (StateT AttentionKV IO) (Text, Int)
+generateNextToken timestep promptTokens temperature vocab tokenCode seedValue = do
+  network <- ask
+  logits <- transformer tokenCode timestep
   nextToken <- if timestep < length promptTokens
     then return (promptTokens !! timestep)
     else if temperature == 0.0
@@ -195,36 +203,39 @@ generateNextToken timestep promptTokens temperature network vocab tokenCode seed
           else vocab !! nextToken
   return (tokenStr, nextToken)
 
-generateTokens :: NetworkConfig -> Int -> [Int] -> Float -> [Text] -> Int -> StateT AttentionKV IO ([Text], Int)
-generateTokens network checkedMaxSteps promptTokens temperature vocab seedValue = go 0 [] 1
-  where
-    go timestep result token
+generateTokens :: Int -> [Int] -> Float -> [Text] -> Int -> ReaderT NetworkConfig (StateT AttentionKV IO) ([Text], Int)
+generateTokens checkedMaxSteps promptTokens temperature vocab seedValue = do
+  network <- ask
+  go network 0 [] 1 where
+    go network timestep result token
       | timestep >= checkedMaxSteps || (timestep /= 0 && token == 1) = return (result, timestep)
       | otherwise = do
         (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
         put (AttentionKV {keyCache = take timestep kC ++ [[]], valueCache = take timestep vC ++ [[]]})
-        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature network vocab token seedValue
+        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature vocab token seedValue
         liftIO $ printf "%s" tokenStr
         liftIO $ hFlush stdout
-        go (timestep + 1) (result ++ [tokenStr]) nextToken
+        go network (timestep + 1) (result ++ [tokenStr]) nextToken
 
 run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   currentTime <- getPOSIXTime
   let
     seedValue = fromMaybe (round currentTime) seed
-    network = initModel modelFileContent
-    (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize network)
+    config = initModel modelFileContent
+    (vocab, vocabScores) = tokenizerInit tokenizerFileContent (vocabSize config)
     promptTokens = bpeEncode (T.pack (fromMaybe "" prompt)) vocab vocabScores
     initStateAttentionKV :: AttentionKV
     initStateAttentionKV = AttentionKV { keyCache = [], valueCache = [] }
-  printf "network: # layers %d / # attention heads %d / head dimension %d / vocabulary size %d\n" (nLayers network) (numAttentionHeads network) (headDimension network) (vocabSize network)
+  printf "network: # layers %d\n" (nLayers config)
+  printf "network: # attention heads %d / head dimension %d\n" (numAttentionHeads config) (headDimension config)
+  printf "network: vocabulary size %d\n" (vocabSize config)
   printf "prompt tokens: %s\n" $ show promptTokens
   printf "initial sentence: %s\n" $ show $ map (vocab !!) promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
   putStrLn "<s>"
   startTime <- getPOSIXTime
-  (_, countTokens) <- evalStateT (generateTokens network steps promptTokens temperature vocab seedValue) initStateAttentionKV
+  (_, countTokens) <- evalStateT (runReaderT (generateTokens steps promptTokens temperature vocab seedValue) config) initStateAttentionKV
   endTime <- getPOSIXTime
   let
     duration :: Integer
