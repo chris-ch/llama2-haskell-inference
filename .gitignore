@@ -23,3 +23,5 @@ cabal.project.local~
 .ghc.environment.*
 *.cabal
 data
+stack.yaml
+stack.yaml.lock
