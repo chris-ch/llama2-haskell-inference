@@ -11,5 +11,5 @@
 	"mounts": [
 		"source=${localEnv:HOME}/.ssh,target=/home/haskell/.ssh,type=bind,readonly"
 	],
-	"postStartCommand": "stack install implicit-hie"
+	"postStartCommand": "stack init --force; stack install implicit-hie"
 }
