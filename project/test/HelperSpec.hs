@@ -3,15 +3,20 @@
 {-# HLINT ignore "Redundant bracket" #-}
 module HelperSpec (spec) where
 
-import Test.Hspec
-import NetworkBuilder
-import Inference
+import Test.Hspec ( describe, it, shouldBe, Spec )
+import NetworkBuilder ( Matrix, readVectors )
 import CustomRandom
+    ( CustomRNG,
+      nextRandomValue,
+      getRandomValue,
+      seedRandomValue,
+      generateRandomVector,
+      generateRandomVectors )
 
 import qualified Data.Vector.Unboxed as V
 import qualified Data.Binary.Get as BG
 import qualified Data.Binary.Put as BP
-import Control.Monad.State
+import Control.Monad.State ( evalState, runState )
 
 spec :: Spec
 spec = do
@@ -82,4 +87,3 @@ spec = do
       let result = evalState (generateRandomVectors 3 4) 2
       length result `shouldBe` 3
       V.length (head result) `shouldBe` 4
-

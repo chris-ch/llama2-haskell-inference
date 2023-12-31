@@ -3,12 +3,33 @@
 module InferenceSpec (spec) where
 
 import Test.Hspec
+    ( describe,
+      it,
+      shouldBe,
+      shouldMatchList,
+      shouldSatisfy,
+      Spec,
+      Expectation )
 import NetworkBuilder
+    ( NetworkConfig(numAttentionHeads, weighting),
+      TransformerWeighting(wo, tokenEmbeddingTable, rmsAttWeight, wq,
+                           freqCisReal, freqCisImag),
+      AttentionKV(AttentionKV, valueCache, keyCache) )
 import Inference
+    ( computeQKV,
+      multiheadActivation,
+      buildActivation,
+      applyRotations,
+      matrixVectorMult,
+      splitVector,
+      rmsNorm,
+      computeDeltaFFN,
+      createLayerToken )
 import CustomRandom
+    ( CustomRNG, generateRandomVector, buildRandomNetworkConfig )
 
 import qualified Data.Vector.Unboxed as V
-import Control.Monad.State
+import Control.Monad.State ( StateT(runStateT), evalState )
 import Control.Monad (replicateM)
 import Control.Monad.Reader ( ReaderT(runReaderT) )
 
@@ -18,7 +39,7 @@ spec = do
     let
       nVocab = 320
       headDim = 8
-      nLayers = 3
+      numLayers = 3
       indexLayer = 2
       nSteps = 5
       hiddenDimension = 2
@@ -27,7 +48,7 @@ spec = do
       let
         smallNetworkConfig :: CustomRNG NetworkConfig
         smallNetworkConfig = do
-          buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
+          buildRandomNetworkConfig nSteps numLayers nVocab headDim hiddenDimension
 
         network = evalState smallNetworkConfig 2
         freqCisRealRow = (freqCisReal (weighting network)) !! 2
@@ -50,8 +71,8 @@ spec = do
       let
         smallNetworkConfig :: CustomRNG (NetworkConfig, V.Vector Float)
         smallNetworkConfig = do
-          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
-          t <- generateRandomVector (headDim * nLayers)
+          n <- buildRandomNetworkConfig nSteps numLayers nVocab headDim hiddenDimension
+          t <- generateRandomVector (headDim * numLayers)
           return (n, t)
 
         (network, token) = evalState smallNetworkConfig 2
@@ -87,8 +108,8 @@ spec = do
       let
         smallQKV :: CustomRNG (NetworkConfig, V.Vector Float)
         smallQKV = do
-          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
-          t <- generateRandomVector (headDim * nLayers)
+          n <- buildRandomNetworkConfig nSteps numLayers nVocab headDim hiddenDimension
+          t <- generateRandomVector (headDim * numLayers)
           return (n, t)
 
         (network, token) = evalState smallQKV 2
@@ -128,7 +149,7 @@ spec = do
     let
       nVocab = 320
       headDim = 48
-      nLayers = 4
+      numLayers = 4
       nSteps = 5
       hiddenDimension = 2
 
@@ -136,7 +157,7 @@ spec = do
       let
         networkForActivation :: CustomRNG (NetworkConfig, [V.Vector Float], [[[V.Vector Float]]], [[[V.Vector Float]]])
         networkForActivation = do
-          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
+          n <- buildRandomNetworkConfig nSteps numLayers nVocab headDim hiddenDimension
           hQ <- replicateM 6 (generateRandomVector 48)
           cK <- sequence [
             replicateM 6 (replicateM 6 (generateRandomVector 48)),

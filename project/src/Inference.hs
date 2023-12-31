@@ -1,8 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE LambdaCase #-}
 
-module Inference where
+module Inference (run, computeQKV, rmsNorm, splitVector, 
+computeDeltaFFN, createLayerToken, multiheadActivation,
+buildActivation, applyRotations, matrixVectorMult, transformer,
+softmax, drawSample
+ ) where
 
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
@@ -64,31 +66,31 @@ computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
     (headsQ, headsK, headsV)
 
 multiheadActivation :: NetworkConfig -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
-multiheadActivation network indexLayer keyCache valueCache headsQ =
-    [buildActivation hd indexLayer valueCache indexHead (scores indexHead) | indexHead <- [0 .. numAttentionHeads network - 1]]
+multiheadActivation network indexLayer kC vC headsQ =
+    [buildActivation hd indexLayer vC indexHead (scores indexHead) | indexHead <- [0 .. numAttentionHeads network - 1]]
     where
       hd = headDimension network
       scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
         where
-          rawScores = computeScores hd keyCache indexLayer indexHead headsQ
+          rawScores = computeScores hd kC indexLayer indexHead headsQ
 
 buildActivation :: Int -> Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
-buildActivation dimension indexLayer valueCache indexHead headScores =
+buildActivation dimension indexLayer vC indexHead headScores =
   DL.foldl' accumulate zeroVector zippedValues
   where
     accumulate :: Vector Float -> (Vector Float, Float) -> Vector Float
     accumulate acc (valueVector, attentionWeight) = V.zipWith (+) acc (scale attentionWeight valueVector)
     zeroVector = V.replicate dimension 0.0
-    zippedValues = zip (map (\count -> valueCache !! count !! indexLayer !! indexHead) [0..]) headScores
+    zippedValues = zip (map (\count -> vC !! count !! indexLayer !! indexHead) [0..]) headScores
     scale w = V.map (w *)
 
 computeScores :: Int -> [[[Vector Float]]] -> Int -> Int -> [Vector Float] -> Vector Float
-computeScores headDimension keyCache indexLayer indexHead headsQ = V.fromList $ map calculateScore keyCache
+computeScores headDim kC indexLayer indexHead headsQ = V.fromList $ map calculateScore kC
   where
     calculateScore :: [[Vector Float]] -> Float
     calculateScore keyVectors =
       let keyVector = ((keyVectors !! indexLayer) !! indexHead)
-      in dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDimension)
+      in dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDim)
 
 applyRotations :: Vector Float -> Vector Float -> Vector Float -> Vector Float
 applyRotations headVector freqCisRealRow freqCisImagRow =
@@ -128,15 +130,15 @@ rmsNorm vector weights =
   in elementsProduct weights normalized
 
 computeDeltaFFN :: TransformerWeighting -> Int -> Vector Float -> Vector Float
-computeDeltaFFN weighting indexLayer token =
+computeDeltaFFN weights indexLayer token =
     let
       sigmoidLinearUnit :: Float -> Float
       sigmoidLinearUnit value = value / (1.0 + exp (-value))
 
-      rmsFFNWeight = rmsFfnWeight weighting !! indexLayer
-      weight1 = w1 weighting !! indexLayer
-      weight2 = w2 weighting !! indexLayer
-      weight3 = w3 weighting !! indexLayer
+      rmsFFNWeight = rmsFfnWeight weights !! indexLayer
+      weight1 = w1 weights !! indexLayer
+      weight2 = w2 weights !! indexLayer
+      weight3 = w3 weights !! indexLayer
       rba = rmsNorm token rmsFFNWeight
       hiddenDimensionBuffer1 = matrixVectorMult weight1 rba
       hiddenDimensionBuffer2 = matrixVectorMult weight3 rba

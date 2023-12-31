@@ -4,10 +4,15 @@ module CustomRandom where
 import qualified Data.Vector.Unboxed as V
 import qualified Control.Monad as M
 
-import Data.Vector.Unboxed
-import Control.Monad.State
-import Data.Bits
+import Data.Vector.Unboxed ( Vector )
+import Control.Monad.State ( State, MonadState(put, get) )
+import Data.Bits ( Bits((.|.), xor) )
 import NetworkBuilder
+    ( NetworkConfig(..),
+      TransformerWeighting(TransformerWeighting, freqCisImag,
+                           tokenEmbeddingTable, rmsAttWeight, wq, wk, wv, wo, rmsFfnWeight,
+                           w1, w2, w3, rmsFinalWeight, freqCisReal),
+      Matrix )
 
 -- Define the state type
 type StateRNG = Int
@@ -60,43 +65,42 @@ generateRandomMatrices :: Int -> Int -> Int -> CustomRNG [Matrix Float]
 generateRandomMatrices count nrows ncols = M.replicateM count (generateRandomVectors nrows ncols)
 
 buildRandomNetworkConfig :: Int -> Int -> Int -> Int -> Int -> CustomRNG NetworkConfig
-buildRandomNetworkConfig nSteps nLayers nVocab headDimension hiddenDimension = do
-    let dimension = headDimension * nLayers
-    tokenEmbeddingTable <- generateRandomVectors nVocab dimension
-    attentionWeights <- generateRandomVectors nLayers dimension
-    queryWeights <- generateRandomMatrices nLayers dimension dimension
-    keyWeights <- generateRandomMatrices nLayers dimension dimension
-    valueWeights <- generateRandomMatrices nLayers dimension dimension
-    outputWeights <- generateRandomMatrices nLayers dimension dimension
-    ffnWeights <- generateRandomVectors nLayers dimension
-    w1 <- generateRandomMatrices nLayers hiddenDimension dimension
-    w2 <- generateRandomMatrices nLayers dimension hiddenDimension
-    w3 <- generateRandomMatrices nLayers hiddenDimension dimension
+buildRandomNetworkConfig nSteps numLayers nVocab headDim hiddenDimension = do
+    let dimension = headDim * numLayers
+    tokenEmbeddingTable' <- generateRandomVectors nVocab dimension
+    attentionWeights <- generateRandomVectors numLayers dimension
+    queryWeights <- generateRandomMatrices numLayers dimension dimension
+    keyWeights <- generateRandomMatrices numLayers dimension dimension
+    valueWeights <- generateRandomMatrices numLayers dimension dimension
+    outputWeights <- generateRandomMatrices numLayers dimension dimension
+    ffnWeights <- generateRandomVectors numLayers dimension
+    w1' <- generateRandomMatrices numLayers hiddenDimension dimension
+    w2' <- generateRandomMatrices numLayers dimension hiddenDimension
+    w3' <- generateRandomMatrices numLayers hiddenDimension dimension
     finalWeights <- generateRandomVector dimension
-    freqCisReal <- generateRandomVectors nSteps (headDimension `div` 2)
-    freqCisImag <- generateRandomVectors nSteps (headDimension `div` 2)
+    freqCisReal' <- generateRandomVectors nSteps (headDim `div` 2)
+    freqCisImag' <- generateRandomVectors nSteps (headDim `div` 2)
     return NetworkConfig { dim = dimension,
-        headDimension = headDimension,
+        headDimension = headDim,
         hiddenDim = hiddenDimension,
-        nLayers = nLayers,
-        numAttentionHeads = nLayers,
-        numKeyValueHeads = nLayers,
+        nLayers = numLayers,
+        numAttentionHeads = numLayers,
+        numKeyValueHeads = numLayers,
         vocabSize = nVocab,
         seqLen = nSteps,
         weighting = TransformerWeighting
-            { tokenEmbeddingTable = tokenEmbeddingTable,
+            { tokenEmbeddingTable = tokenEmbeddingTable',
             rmsAttWeight = attentionWeights,
             wq = queryWeights,
             wk = keyWeights,
             wv = valueWeights,
             wo = outputWeights,
             rmsFfnWeight = ffnWeights,
-            w1 = w1,
-            w2 = w2,
-            w3 = w3,
+            w1 = w1',
+            w2 = w2',
+            w3 = w3',
             rmsFinalWeight = finalWeights,
-            freqCisReal = freqCisReal,
-            freqCisImag = freqCisImag
+            freqCisReal = freqCisReal',
+            freqCisImag = freqCisImag'
             }
         }
-

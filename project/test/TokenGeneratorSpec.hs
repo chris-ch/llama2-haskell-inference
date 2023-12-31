@@ -8,7 +8,7 @@ import Inference
 import CustomRandom
 
 import qualified Data.Vector.Unboxed as V
-import Control.Monad.State
+import Control.Monad.State ( evalState, evalStateT )
 import Control.Monad (replicateM)
 import Control.Monad.Reader ( ReaderT(runReaderT) )
 
@@ -18,7 +18,7 @@ spec = do
     let 
       nVocab = 32000
       headDim = 48
-      nLayers = 6
+      numLayers = 6
       nSteps = 256
       hiddenDimension = 768
       seed = 2
@@ -28,21 +28,21 @@ spec = do
 
         networkForTokenGeneration :: CustomRNG (NetworkConfig, V.Vector Float, [[[V.Vector Float]]], [[[V.Vector Float]]])
         networkForTokenGeneration = do
-          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
-          t <- generateRandomVector (headDim * nLayers)
+          n <- buildRandomNetworkConfig nSteps numLayers nVocab headDim hiddenDimension
+          t <- generateRandomVector (headDim * numLayers)
           cK <- sequence [
-            replicateM 6 (replicateM nLayers (generateRandomVector headDim)),
-            replicateM 6 (replicateM nLayers (generateRandomVector headDim)),
-            replicateM 2 (replicateM nLayers (generateRandomVector headDim))
+            replicateM 6 (replicateM numLayers (generateRandomVector headDim)),
+            replicateM 6 (replicateM numLayers (generateRandomVector headDim)),
+            replicateM 2 (replicateM numLayers (generateRandomVector headDim))
             ]
           cV <- sequence [
-            replicateM 6 (replicateM nLayers (generateRandomVector headDim)),
-            replicateM 6 (replicateM nLayers (generateRandomVector headDim)),
-            replicateM 2 (replicateM nLayers (generateRandomVector headDim))
+            replicateM 6 (replicateM numLayers (generateRandomVector headDim)),
+            replicateM 6 (replicateM numLayers (generateRandomVector headDim)),
+            replicateM 2 (replicateM numLayers (generateRandomVector headDim))
             ]
           return (n, t, cK, cV)
         
-        (network, token, cacheKey, cacheValue) = evalState networkForTokenGeneration seed
+        (network, _, cacheKey, cacheValue) = evalState networkForTokenGeneration seed
         tokenCode = 543
         stepCount = 2
 
