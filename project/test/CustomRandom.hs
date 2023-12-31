@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module CustomRandom where
 
 import Data.Vector.Unboxed
@@ -20,18 +21,18 @@ nextRandomValue = do
   currentValue <- get
   -- Update the state (generate next custom random value)
   let randomValue = customRandom currentValue
-  put $ randomValue
-  return $ (fromIntegral (randomValue `mod` 1000)) / 1000.0
+  put randomValue
+  return $ fromIntegral (randomValue `mod` 1000) / 1000.0
 
 -- Getting the current value
 getRandomValue :: CustomRNG Float
 getRandomValue = do
     currentValue <- get
-    return $ (fromIntegral (currentValue `mod` 1000)) / 1000.0
+    return $ fromIntegral (currentValue `mod` 1000) / 1000.0
 
 seedRandomValue :: Int -> CustomRNG ()
 seedRandomValue seed = do
-    put $ seed
+    put seed
 
 customRandom :: Int -> Int
 customRandom currentValue =
@@ -49,7 +50,7 @@ generateRandomArrays :: Int -> Int -> CustomRNG [[Float]]
 generateRandomArrays nrows ncols = M.replicateM nrows (generateRandomArray ncols)
 
 generateRandomVector :: Int -> CustomRNG (Vector Float)
-generateRandomVector size = fmap V.fromList $ M.replicateM size nextRandomValue
+generateRandomVector size = V.fromList <$> M.replicateM size nextRandomValue
 
 generateRandomVectors :: Int -> Int -> CustomRNG [Vector Float]
 generateRandomVectors count size = M.replicateM count (generateRandomVector size)
@@ -97,4 +98,4 @@ buildRandomNetworkConfig nSteps nLayers nVocab headDimension hiddenDimension = d
             freqCisImag = freqCisImag
             }
         }
-   
+

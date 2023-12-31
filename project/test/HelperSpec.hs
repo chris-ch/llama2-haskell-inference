@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module HelperSpec (spec) where
 
 import Test.Hspec
@@ -44,10 +45,7 @@ spec = do
           -- run the random generator twice
           _ <- nextRandomValue
           _ <- nextRandomValue
-          -- Get the current value
-          randomValue <- getRandomValue
-          -- Return a tuple of random value and counter value * 2
-          return randomValue
+          getRandomValue
 
         (result, finalState) = runState testRandom 0
 
@@ -58,14 +56,14 @@ spec = do
       let result = evalState (generateRandomVector 3) 2
       V.length result `shouldBe` 3
       result `shouldBe` (V.fromList [0.047, 0.453, 0.653])
-      
+
     it "generates custom random vector(4)" $ do
       let result = evalState (generateRandomVector 4) 2
       V.length result `shouldBe` 4
       result `shouldBe` (V.fromList [0.047, 0.453, 0.653, 0.577])
-    
+
     it "generates custom random vectors consecutively" $ do
-      let 
+      let
         vectorsTwice :: CustomRNG (V.Vector Float, V.Vector Float)
         vectorsTwice = do
           v1 <- generateRandomVector 4
@@ -77,7 +75,7 @@ spec = do
       V.length vector2 `shouldBe` 4
       vector1 `shouldBe` (V.fromList [0.047, 0.453, 0.653, 0.577])
       vector2 `shouldBe` (V.fromList [0.022, 0.253, 0.432, 0.524])
-    
+
     it "generates custom random matrix" $ do
       let result = evalState (generateRandomVectors 3 4) 2
       (length result) `shouldBe` 3

@@ -1,11 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant bracket" #-}
 
 module Builder (
   NetworkConfig(..),
-  AttentionKV(..), 
-  Matrix, 
+  AttentionKV(..),
+  Matrix,
   TransformerWeighting(..),
   initModel, tokenizerInit, bpeEncode, readVectors
   ) where
@@ -89,8 +91,8 @@ parseNetworkConfigFile = do
         w2 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
         w3 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
         rmsFinalWeight <- readVector (fromIntegral dim)
-        freqCisReal <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
-        freqCisImag <- readVectors (fromIntegral seqLen) (((fromIntegral dim) `div` (fromIntegral numAttentionHeads)) `div` 2)
+        freqCisReal <- readVectors (fromIntegral seqLen) ((fromIntegral dim `div` (fromIntegral numAttentionHeads)) `div` 2)
+        freqCisImag <- readVectors (fromIntegral seqLen) ((fromIntegral dim `div` (fromIntegral numAttentionHeads)) `div` 2)
 
         let
             headDimension = dim `div` numAttentionHeads
@@ -122,7 +124,7 @@ parseNetworkConfigFile = do
             }
 
 initModel :: BSL.ByteString -> NetworkConfig
-initModel networkConfigFile = BG.runGet parseNetworkConfigFile networkConfigFile
+initModel = BG.runGet parseNetworkConfigFile
 
 parseTokens :: BSL.ByteString -> Int -> ([T.Text], [Float])
 parseTokens file size = (vocab, vocabScores)
@@ -141,10 +143,10 @@ parseTokens file size = (vocab, vocabScores)
     vocab = snd <$> BG.runGet scoresAndStrings file
 
 tokenizerInit :: BSL.ByteString -> Int -> ([T.Text], [Float])
-tokenizerInit file size = parseTokens (BSL.drop 4 file) size
+tokenizerInit file = parseTokens (BSL.drop 4 file)
 
 strLookup :: Text -> [T.Text] -> Int
-strLookup occurrence = fromMaybe (-1) . DL.findIndex (occurrence ==)
+strLookup occurrence = fromMaybe (-1) . DL.elemIndex occurrence
 
 processTokens :: [Int] -> [T.Text] -> [Float] -> [Int]
 processTokens tokens vocab vocabScores = process tokens

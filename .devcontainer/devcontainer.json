@@ -1,9 +1,9 @@
 {
-	"image": "ghcr.io/chris-ch/docker-ghcup:v1.0.5",
+	"image": "ghcr.io/chris-ch/docker-ghcup:v1.0.7",
 	"customizations": {
 			"vscode": {
 					"extensions": [
-							"justusadam.language-haskell"
+						"haskell.haskell"
 					]
 			}
 	},

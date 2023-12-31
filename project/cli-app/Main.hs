@@ -31,8 +31,8 @@ optionsParser = Options
 main :: IO ()
 main = do
     Options {..} <- execParser $ info (optionsParser <**> helper) fullDesc
-    modelFileHandle <- flip openFile ReadMode =<< return modelFile
-    tokenizerFileHandle <- flip openFile ReadMode =<< return tokenizerFile
+    modelFileHandle <- openFile modelFile ReadMode
+    tokenizerFileHandle <- openFile tokenizerFile ReadMode
     tokenizerAbsolutePath <- canonicalizePath tokenizerFile
     printf "loading tokenizer %s\n" tokenizerAbsolutePath
     modelFileContent <- BSL.hGetContents modelFileHandle
