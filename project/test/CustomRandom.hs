@@ -57,8 +57,8 @@ generateRandomVectors count size = M.replicateM count (generateRandomVector size
 generateRandomMatrices :: Int -> Int -> Int -> CustomRNG [Matrix Float]
 generateRandomMatrices count nrows ncols = M.replicateM count (generateRandomVectors nrows ncols)
 
-buildRandomNetwork :: Int -> Int -> Int -> Int -> Int -> CustomRNG Network
-buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension = do
+buildRandomNetworkConfig :: Int -> Int -> Int -> Int -> Int -> CustomRNG NetworkConfig
+buildRandomNetworkConfig nSteps nLayers nVocab headDimension hiddenDimension = do
     let dimension = headDimension * nLayers
     tokenEmbeddingTable <- generateRandomVectors nVocab dimension
     attentionWeights <- generateRandomVectors nLayers dimension
@@ -73,7 +73,7 @@ buildRandomNetwork nSteps nLayers nVocab headDimension hiddenDimension = do
     finalWeights <- generateRandomVector dimension
     freqCisReal <- generateRandomVectors nSteps (headDimension `div` 2)
     freqCisImag <- generateRandomVectors nSteps (headDimension `div` 2)
-    return Network { dim = dimension,
+    return NetworkConfig { dim = dimension,
         headDimension = headDimension,
         hiddenDim = hiddenDimension,
         nLayers = nLayers,

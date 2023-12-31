@@ -23,9 +23,9 @@ spec = do
     it "generates a token" $ do
       let
 
-        networkForTokenGeneration :: CustomRNG (Network, V.Vector Float, [[[V.Vector Float]]], [[[V.Vector Float]]])
+        networkForTokenGeneration :: CustomRNG (NetworkConfig, V.Vector Float, [[[V.Vector Float]]], [[[V.Vector Float]]])
         networkForTokenGeneration = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector (headDim * nLayers)
           cK <- sequence [
             replicateM 6 (replicateM nLayers (generateRandomVector headDim)),
@@ -43,10 +43,10 @@ spec = do
         tokenCode = 543
         stepCount = 2
 
-      logits <- evalStateT (transformer tokenCode stepCount network) (RunCache {keyCache=cacheKey, valueCache=cacheValue})
+      logits <- evalStateT (transformer tokenCode stepCount network) (AttentionKV {keyCache=cacheKey, valueCache=cacheValue})
 
       (V.take 5 logits) `shouldBe` V.fromList [76.487885,75.86574,69.82333,73.169655,72.23714]
       (V.take 5 (V.drop 31995 logits)) `shouldBe` V.fromList [81.34005,77.39803,78.24066,82.83305,75.38994]
 
-      let next_token = indexHighestCDF 0.4 $ softmax (V.map (/ 0.8) logits) (vocabSize network)
-      next_token `shouldBe` 12854
+      next_token <- drawSample 11284652 $ softmax (V.map (/ 0.8) logits) (vocabSize network)
+      next_token `shouldBe` 27569

@@ -13,11 +13,6 @@ import Control.Monad.State
 spec :: Spec
 spec = do
   describe "Helper functions" $ do
-    it "replaces a value" $ do
-      replaceAtIndex 1 3.0 ([1.0, 2.0, 3.0]::[Float]) `shouldBe` ([1.0, 3.0, 3.0]::[Float])
-
-    it "replaces at the end of the list" $ do
-      replaceAtIndex 2 0.5 ([1.0, 2.0, 3.0]::[Float]) `shouldBe` ([1.0, 2.0, 0.5]::[Float])
 
     it "reshapes matrix as vector" $ do
       V.concat (fmap V.fromList [
@@ -88,14 +83,3 @@ spec = do
       (length result) `shouldBe` 3
       (V.length (result !! 0)) `shouldBe` 4
 
-    it "draws sample from CDF" $ do
-        indexHighestCDF 0.05 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 0
-        indexHighestCDF 0.2 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 1
-        indexHighestCDF 0.35 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 1
-        indexHighestCDF 0.4 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 2
-        indexHighestCDF 0.45 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 2
-        indexHighestCDF 0.8 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 4
-        indexHighestCDF 0.85 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 4
-        indexHighestCDF 0.95 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 5
-        indexHighestCDF 1.0 (V.fromList [0.1, 0.3, 0.2, 0.1, 0.2, 0.1]) `shouldBe` 5
-        indexHighestCDF 0.1 (V.fromList [1.0]) `shouldBe` 0

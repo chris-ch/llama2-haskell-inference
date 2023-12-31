@@ -22,12 +22,12 @@ spec = do
 
     it "builds a small network correctly" $ do
       let
-        smallNetwork :: CustomRNG Network
-        smallNetwork = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+        smallNetworkConfig :: CustomRNG NetworkConfig
+        smallNetworkConfig = do
+          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           return n
           
-        network = evalState smallNetwork 2
+        network = evalState smallNetworkConfig 2
         freqCisRealRow = (freqCisReal (weighting network)) !! 2
         freqCisImagRow = (freqCisImag (weighting network)) !! 2
         rmsAttention = rmsAttWeight (weighting network)
@@ -46,13 +46,13 @@ spec = do
 
     it "computes RMS norm correctly" $ do
       let
-        smallNetwork :: CustomRNG (Network, V.Vector Float)
-        smallNetwork = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+        smallNetworkConfig :: CustomRNG (NetworkConfig, V.Vector Float)
+        smallNetworkConfig = do
+          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector (headDim * nLayers)
           return (n, t)
           
-        (network, token) = evalState smallNetwork 2
+        (network, token) = evalState smallNetworkConfig 2
         rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
 
       V.length rba `shouldBe` 24
@@ -83,9 +83,9 @@ spec = do
 
     it "computes Q, K and V" $ do
       let
-        smallQKV :: CustomRNG (Network, V.Vector Float)
+        smallQKV :: CustomRNG (NetworkConfig, V.Vector Float)
         smallQKV = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector (headDim * nLayers)
           return (n, t)
 
@@ -132,9 +132,9 @@ spec = do
 
     it "builds a network for activation" $ do
       let
-        networkForActivation :: CustomRNG (Network, [V.Vector Float], [[[V.Vector Float]]], [[[V.Vector Float]]])
+        networkForActivation :: CustomRNG (NetworkConfig, [V.Vector Float], [[[V.Vector Float]]], [[[V.Vector Float]]])
         networkForActivation = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           hQ <- replicateM 6 (generateRandomVector 48)
           cK <- sequence [
             replicateM 6 (replicateM 6 (generateRandomVector 48)),
@@ -204,9 +204,9 @@ spec = do
 
     it "computes delta FFN" $ do
       let
-        networkForDeltaFFN :: CustomRNG (Network, V.Vector Float)
+        networkForDeltaFFN :: CustomRNG (NetworkConfig, V.Vector Float)
         networkForDeltaFFN = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector 288
           return (n, t)
         (network, token) = evalState networkForDeltaFFN 2
@@ -225,9 +225,9 @@ spec = do
 
     it "creates new token" $ do
       let
-        networkForNewToken :: CustomRNG (Network, V.Vector Float, [[[V.Vector Float]]], [[[V.Vector Float]]])
+        networkForNewToken :: CustomRNG (NetworkConfig, V.Vector Float, [[[V.Vector Float]]], [[[V.Vector Float]]])
         networkForNewToken = do
-          n <- buildRandomNetwork nSteps nLayers nVocab headDim hiddenDimension
+          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector 288
           cK <- sequence [
             replicateM 6 (replicateM 6 (generateRandomVector 48)),
@@ -250,7 +250,7 @@ spec = do
       
       (token', runCache') <- runStateT
         (createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow token)
-        (RunCache { keyCache = cacheKey, valueCache = cacheValue })
+        (AttentionKV { keyCache = cacheKey, valueCache = cacheValue })
 
       let
         cacheKey' = keyCache (runCache')

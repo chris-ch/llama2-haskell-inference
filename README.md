@@ -36,8 +36,8 @@ They looked and looked. Then, they found the toy car under a tree. Tim was very 
 ### Debugging / Profiling
 
 ```shell
-stack build --profile  --executable-profiling --library-profiling
-stack run --profile -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town" +RTS -p
+stack build --profile --executable-profiling
+stack run --profile -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 12 "In that little town" +RTS -p -s -t -N 
 ```
 
 ### Unit testing

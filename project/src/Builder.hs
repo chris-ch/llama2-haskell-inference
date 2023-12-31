@@ -3,8 +3,8 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Builder (
-  Network(..),
-  RunCache(..), 
+  NetworkConfig(..),
+  AttentionKV(..), 
   Matrix, 
   TransformerWeighting(..),
   initModel, tokenizerInit, bpeEncode, readVectors
@@ -25,7 +25,7 @@ import Data.Vector.Unboxed (Vector)
 
 type Matrix a = [Vector a] -- Matrix as row vectors
 
-data RunCache = RunCache
+data AttentionKV = AttentionKV
     { keyCache :: [[[Vector Float]]]
     , valueCache :: [[[Vector Float]]]
     } deriving (Show)
@@ -46,7 +46,7 @@ data TransformerWeighting = TransformerWeighting
     , freqCisImag :: [Vector Float]
     } deriving (Show)
 
-data Network = Network
+data NetworkConfig = NetworkConfig
     { dim :: Int
     , hiddenDim :: Int
     , nLayers :: Int
@@ -69,8 +69,8 @@ readVectors nrows ncols = replicateM nrows (readVector ncols)
 readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
 readMatrices ndepth nrows ncols = replicateM ndepth (readVectors nrows ncols)
 
-parseNetworkFile :: BG.Get Network
-parseNetworkFile = do
+parseNetworkConfigFile :: BG.Get NetworkConfig
+parseNetworkConfigFile = do
         dim <- getInt32le
         hiddenDim <- getInt32le
         nLayers <- getInt32le
@@ -109,7 +109,7 @@ parseNetworkFile = do
               , freqCisReal = freqCisReal
               , freqCisImag = freqCisImag
               }
-        return $ Network
+        return $ NetworkConfig
             { dim = fromIntegral dim
             , hiddenDim = fromIntegral hiddenDim
             , nLayers = fromIntegral nLayers
@@ -121,8 +121,8 @@ parseNetworkFile = do
             , weighting = weighting
             }
 
-initModel :: BSL.ByteString -> Network
-initModel networkConfigFile = BG.runGet parseNetworkFile networkConfigFile
+initModel :: BSL.ByteString -> NetworkConfig
+initModel networkConfigFile = BG.runGet parseNetworkConfigFile networkConfigFile
 
 parseTokens :: BSL.ByteString -> Int -> ([T.Text], [Float])
 parseTokens file size = (vocab, vocabScores)
