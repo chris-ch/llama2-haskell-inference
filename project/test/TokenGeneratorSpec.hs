@@ -8,6 +8,7 @@ import CustomRandom
 import qualified Data.Vector.Unboxed as V
 import Control.Monad.State
 import Control.Monad (replicateM)
+import Control.Monad.Reader ( ReaderT(runReaderT) )
 
 spec :: Spec
 spec = do
@@ -43,7 +44,7 @@ spec = do
         tokenCode = 543
         stepCount = 2
 
-      logits <- evalStateT (transformer tokenCode stepCount network) (AttentionKV {keyCache=cacheKey, valueCache=cacheValue})
+      logits <- evalStateT (runReaderT (transformer tokenCode stepCount) network) (AttentionKV {keyCache=cacheKey, valueCache=cacheValue})
 
       (V.take 5 logits) `shouldBe` V.fromList [76.487885,75.86574,69.82333,73.169655,72.23714]
       (V.take 5 (V.drop 31995 logits)) `shouldBe` V.fromList [81.34005,77.39803,78.24066,82.83305,75.38994]

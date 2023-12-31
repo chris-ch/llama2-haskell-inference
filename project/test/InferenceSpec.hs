@@ -8,6 +8,7 @@ import CustomRandom
 import qualified Data.Vector.Unboxed as V
 import Control.Monad.State
 import Control.Monad (replicateM)
+import Control.Monad.Reader ( ReaderT(runReaderT) )
 
 spec :: Spec
 spec = do
@@ -249,7 +250,7 @@ spec = do
         (q, k, v) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
       
       (token', runCache') <- runStateT
-        (createLayerToken network stepCount indexLayer freqCisRealRow freqCisImagRow token)
+        (runReaderT (createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token) network)
         (AttentionKV { keyCache = cacheKey, valueCache = cacheValue })
 
       let
