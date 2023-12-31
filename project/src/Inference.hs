@@ -16,6 +16,7 @@ import Builder (NetworkConfig(..), AttentionKV(..),
   Matrix, TransformerWeighting(..),
   initModel, tokenizerInit, bpeEncode)
 import Control.Monad.State
+    ( StateT, MonadIO(liftIO), evalStateT, MonadState(put), gets )
 import System.IO (hFlush, stdout)
 import Control.Monad (foldM)
 import Text.Printf (printf)

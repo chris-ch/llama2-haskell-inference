@@ -2,7 +2,7 @@
 module Main (main) where
 
 import Options.Applicative
-import System.IO
+import System.IO ( hClose, openFile, IOMode(ReadMode) )
 import qualified Data.ByteString.Lazy as BSL
 import Inference (run)
 import System.Directory
