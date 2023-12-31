@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant bracket" #-}
 module InferenceSpec (spec) where
 
 import Test.Hspec
@@ -13,7 +15,7 @@ import Control.Monad.Reader ( ReaderT(runReaderT) )
 spec :: Spec
 spec = do
   describe "Inference on a small network" $ do
-    let 
+    let
       nVocab = 320
       headDim = 8
       nLayers = 3
@@ -25,21 +27,20 @@ spec = do
       let
         smallNetworkConfig :: CustomRNG NetworkConfig
         smallNetworkConfig = do
-          n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
-          return n
-          
+          buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
+
         network = evalState smallNetworkConfig 2
         freqCisRealRow = (freqCisReal (weighting network)) !! 2
         freqCisImagRow = (freqCisImag (weighting network)) !! 2
         rmsAttention = rmsAttWeight (weighting network)
         tokenMatrix = tokenEmbeddingTable (weighting network)
 
-      (tokenMatrix !! 0 V.! 0) `shouldBe` 0.047
+      (head tokenMatrix V.! 0) `shouldBe` 0.047
       (length tokenMatrix) `shouldBe` 320
-      (V.length (tokenMatrix !! 0)) `shouldBe` 24
+      (V.length (head tokenMatrix)) `shouldBe` 24
       (tokenMatrix !! 319 V.! 23) `shouldBe` 0.828
       (length rmsAttention) `shouldBe` 3
-      (V.toList (rmsAttention !! 2)) `shouldMatchList` [0.448, 0.975, 0.957, 0.775, 0.288, 0.913, 0.529, 0.169, 0.7,
+      V.toList (rmsAttention !! 2) `shouldMatchList` [0.448, 0.975, 0.957, 0.775, 0.288, 0.913, 0.529, 0.169, 0.7,
                   0.511, 0.013, 0.952, 0.401, 0.661, 0.845, 0.121, 0.272, 0.256,
                   0.376, 0.958, 0.046, 0.471, 0.226, 0.462]
       (V.toList freqCisRealRow) `shouldMatchList` [0.828, 0.145, 0.344, 0.043]
@@ -52,7 +53,7 @@ spec = do
           n <- buildRandomNetworkConfig nSteps nLayers nVocab headDim hiddenDimension
           t <- generateRandomVector (headDim * nLayers)
           return (n, t)
-          
+
         (network, token) = evalState smallNetworkConfig 2
         rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
 
@@ -63,7 +64,7 @@ spec = do
       ((rmsAttWeight (weighting network)) !! indexLayer) V.! 7 `shouldBe` 0.169
       rba V.! 0 `shouldBe` 0.3445728
       rba V.! 23 `shouldBe` 0.42241627
- 
+
     it "applies small rotations" $ do
       let
         headVector = V.fromList [1.0, 2.0, 3.0, 4.0]
@@ -99,15 +100,15 @@ spec = do
         qVector = matrixVectorMult (weightsQ !! indexLayer) rba
         wQ = splitVector (numAttentionHeads network) (qVector)
         rotatedQ = applyRotations (wQ !! 2 ) freqCisRealRow freqCisImagRow
-      
+
       (length (weightsQ !! indexLayer)) `shouldBe` 24
-      (V.length ((weightsQ !! indexLayer) !! 0)) `shouldBe` 24
+      (V.length (head (weightsQ !! indexLayer))) `shouldBe` 24
       (numAttentionHeads network) `shouldBe` 3
       (V.length qVector) `shouldBe` 24
       rba V.! 0 `shouldBe` 0.3445728
       rba V.! 23 `shouldBe` 0.42241627
       (length wQ) `shouldBe` 3
-      (V.length (wQ !! 0)) `shouldBe` 8
+      (V.length (head wQ)) `shouldBe` 8
       (V.toList freqCisImagRow) `shouldMatchList` [0.981, 0.754, 0.745, 0.609]
       (V.toList freqCisRealRow) `shouldMatchList` [0.828, 0.145, 0.344, 0.043]
 
@@ -115,16 +116,16 @@ spec = do
       (length ks) `shouldBe` 3
       (length vs) `shouldBe` 3
       (V.length rotatedQ) `shouldBe` 8
-      
+
       shouldBeSmall 1e-3 $ vectorDistance (V.take 4 qVector) [4.652121 , 4.394577 , 5.8498507, 5.508383]
       shouldBeSmall 1e-3 $ vectorDistance (wQ !! 2) [5.5972257, 5.32329,   4.0131316, 5.037126,  4.0925946, 5.810919,  5.721209, 5.626199 ]
       shouldBeSmall 1e-3 $ vectorDistance rotatedQ [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
       shouldBeSmall 1e-3 $ vectorDistance (qs !! 2) [-0.58764449, 9.89856247, -3.21608903, 3.75628453, -2.92128194, 5.04793915, -3.18034321, 3.72614302]
       shouldBeSmall 1e-3 $ vectorDistance (ks !! 1) [-1.262483, 9.873482, -1.809541, 4.85637, -1.716298, 4.831686, -2.449315, 3.406103]
       shouldBeSmall 1e-3 $ vectorDistance (vs !! 2) [4.61404 , 5.498788, 5.519291, 5.196641, 4.792354, 3.996622, 4.755136, 5.863463]
- 
+
   describe "Multihead activation" $ do
-    let 
+    let
       nVocab = 320
       headDim = 48
       nLayers = 4
@@ -150,7 +151,7 @@ spec = do
         (network, headsQ, cacheKey, cacheValue) = evalState networkForActivation 2
         headScoresExample = [0.5194815185588364, 0.48051848144116366]
         activation = buildActivation headDim indexLayer cacheValue 3 headScoresExample
-        
+
         expectedActivation = [0.3045971,0.28449363,0.48838997,0.26805186,0.7258309,0.5840917,
           0.678182,0.6833122,0.7507793,0.48202664,0.26566213,0.4568178,0.32925987,0.72464937,
           0.7884679,0.5520643,0.5221176,0.27327257,0.3940515,0.1524674,0.38288274,0.90151936,
@@ -158,17 +159,17 @@ spec = do
           0.722545,0.30416897,0.86215585,0.49119535,0.40411735,0.25259772,0.4708447,0.42280445,
           0.4961695,0.61828625,0.4113124,0.8776885,0.84770113,0.74740267,0.6527272,0.5420901,
           0.2864671,0.47077942]
-       
+
 
         result = multiheadActivation network indexLayer cacheKey cacheValue headsQ
 
       activation `shouldBe` V.fromList expectedActivation
 
-      (headsQ !! 0) `shouldBe` V.fromList [0.734,0.616,0.897,0.159,0.346,0.646,0.22,0.586,0.981,
+      (head headsQ) `shouldBe` V.fromList [0.734,0.616,0.897,0.159,0.346,0.646,0.22,0.586,0.981,
           0.769,0.913,0.77,0.791,0.171,0.255,0.385,0.716,0.948,0.233,0.858,0.206,0.161,9.0e-2,
           0.195,0.828,0.145,0.344,4.3e-2,0.766,0.949,0.75,0.7,0.953,0.514,0.37,0.866,0.755,0.629,
           0.403,0.726,4.8e-2,0.821,0.872,0.752,0.981,0.754,0.745,0.609]
-          
+
       (headsQ !! 5) `shouldBe` V.fromList [9.0e-2,0.195,0.828,0.145,0.344,4.3e-2,0.766,0.949,0.75,
         0.7,0.953,0.514,0.37,0.866,0.755,0.629,0.403,0.726,4.8e-2,0.821,0.872,0.752,0.981,0.754,
         0.745,0.609,0.162,7.6e-2,0.564,0.644,0.398,0.813,0.421,0.665,0.445,0.391,0.504,0.73,0.434,
@@ -176,8 +177,8 @@ spec = do
 
       (numAttentionHeads network) `shouldBe` 4
       (length result) `shouldBe` 4
-      (V.length (result !! 0)) `shouldBe` 48
-      (result !! 0) `shouldBe` V.fromList [0.30273914,0.6412468,0.4341167,0.313628,0.6088015,
+      (V.length (head result)) `shouldBe` 48
+      (head result) `shouldBe` V.fromList [0.30273914,0.6412468,0.4341167,0.313628,0.6088015,
         0.7288631,7.149603e-2,0.554964,0.32315883,0.43760967,0.8307215,0.3190574,0.35306537,0.5871704,
         0.64360785,0.87371045,0.15746486,0.6745846,0.36556137,0.3270446,0.44000852,0.40689552,0.17859621,
         0.9115449,0.26830727,0.6173085,0.62384546,0.44949543,0.20511425,0.31641296,0.53728104,0.58635247,
@@ -194,9 +195,9 @@ spec = do
                                 0.25259773, 0.47084469, 0.42280443, 0.49616951, 0.61828625,
                                 0.41131239, 0.87768853, 0.84770113, 0.74740264, 0.65272719,
                                 0.54209012, 0.28646711, 0.47077943]
-          
+
   describe "Delta FFN" $ do
-    let 
+    let
       nVocab = 32000
       headDim = 48
       nLayers = 6
@@ -248,7 +249,7 @@ spec = do
         freqCisImagRow = ((freqCisImag (weighting network)) !! 2)
 
         (q, k, v) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
-      
+
       (token', runCache') <- runStateT
         (runReaderT (createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token) network)
         (AttentionKV { keyCache = cacheKey, valueCache = cacheValue })
@@ -264,7 +265,7 @@ spec = do
       shouldBeSmall 1.0 $ (V.minimum deltaTokenQKV) - 9862.115233500097
 
       length activations `shouldBe` 6
-      V.length (activations !! 0) `shouldBe` 48
+      V.length (head activations) `shouldBe` 48
       shouldBeSmall 1e-1 $ (V.sum (V.concat activations)) - 19385.04123687744
       shouldBeSmall 1e-1 $ (minimum (map V.minimum activations)) - 59.436580657958984
       shouldBeSmall 1e-1 $ (maximum (map V.maximum activations)) - 87.67498779296875
@@ -273,8 +274,8 @@ spec = do
       length k `shouldBe` 6
       length v `shouldBe` 6
 
-      shouldBeSmall 1e-3 $ (k !! 0 V.! 0) - 13.5140090
-      shouldBeSmall 1e-3 $ (k !! 0 V.! 47) - 76.510922895
+      shouldBeSmall 1e-3 $ (head k V.! 0) - 13.5140090
+      shouldBeSmall 1e-3 $ (head k V.! 47) - 76.510922895
       shouldBeSmall 1e-3 $ (k !! 1 V.! 0) - 4.048432575029892
       shouldBeSmall 1e-3 $ (k !! 1 V.! 47) - 75.99460779792548
       shouldBeSmall 1e-3 $ (k !! 2 V.! 0) - (-7.048659211879567)
@@ -285,9 +286,9 @@ spec = do
       shouldBeSmall 1e-3 $ (k !! 4 V.! 47) - 74.44716220191003
       shouldBeSmall 1e-3 $ (k !! 5 V.! 0) - 10.358258170685986
       shouldBeSmall 1e-3 $ (k !! 5 V.! 47) - 74.42684423320338
- 
-      shouldBeSmall 1e-3 $ (q !! 0 V.! 0) - 10.047595305990399
-      shouldBeSmall 1e-3 $ (q !! 0 V.! 47) - 73.5352357337324
+
+      shouldBeSmall 1e-3 $ (head q V.! 0) - 10.047595305990399
+      shouldBeSmall 1e-3 $ (head q V.! 47) - 73.5352357337324
       shouldBeSmall 1e-3 $ (q !! 1 V.! 0) - 14.202909536670631
       shouldBeSmall 1e-3 $ (q !! 1 V.! 47) - 67.21390186872122
       shouldBeSmall 1e-3 $ (q !! 2 V.! 0) - 5.207165646689646
@@ -299,8 +300,8 @@ spec = do
       shouldBeSmall 1e-3 $ (q !! 5 V.! 0) - 12.008699038487975
       shouldBeSmall 1e-3 $ (q !! 5 V.! 47) - 70.1946099367691
 
-      shouldBeSmall 1e-3 $ (v !! 0 V.! 0) - 69.27178955078125
-      shouldBeSmall 1e-3 $ (v !! 0 V.! 47) - 68.98504638671875
+      shouldBeSmall 1e-3 $ (head v V.! 0) - 69.27178955078125
+      shouldBeSmall 1e-3 $ (head v V.! 47) - 68.98504638671875
       shouldBeSmall 1e-3 $ (v !! 1 V.! 0) - 68.5321044921875
       shouldBeSmall 1e-3 $ (v !! 1 V.! 47) - 65.29499816894531
       shouldBeSmall 1e-3 $ (v !! 2 V.! 0) - 67.18028259277344
@@ -314,9 +315,9 @@ spec = do
 
       length cacheKey' `shouldBe` 3
       length cacheValue' `shouldBe` 3
-      shouldBeSmall 1e-3 $ (cacheKey' !! 2 !! 2 !! 0  V.! 0) - 13.514
+      shouldBeSmall 1e-3 $ (head (cacheKey' !! 2 !! 2)  V.! 0) - 13.514
       shouldBeSmall 1e-3 $ (cacheKey' !! 2 !! 2 !! 5  V.! 47) - 74.42679
-      shouldBeSmall 1e-3 $ (cacheValue' !! 2 !! 2 !! 0  V.! 0) - 69.27178955
+      shouldBeSmall 1e-3 $ (head (cacheValue' !! 2 !! 2)  V.! 0) - 69.27178955
       shouldBeSmall 1e-3 $ (cacheValue' !! 2 !! 2 !! 5  V.! 47) - 68.813262939
 
       token V.! 0 `shouldBe` 0.616
@@ -336,4 +337,4 @@ vectorDistance :: (V.Vector Float) -> [Float] -> Float
 vectorDistance vector array = V.sum (V.zipWith (-) vector (V.fromList array))
 
 shouldBeSmall :: Float -> Float -> Expectation
-shouldBeSmall threshold a = shouldSatisfy a (\x -> abs(x) < threshold)
+shouldBeSmall threshold a = shouldSatisfy a (\x -> abs (x) < threshold)

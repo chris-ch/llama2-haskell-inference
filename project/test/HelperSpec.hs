@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant bracket" #-}
 module HelperSpec (spec) where
 
 import Test.Hspec
@@ -78,6 +80,6 @@ spec = do
 
     it "generates custom random matrix" $ do
       let result = evalState (generateRandomVectors 3 4) 2
-      (length result) `shouldBe` 3
-      (V.length (result !! 0)) `shouldBe` 4
+      length result `shouldBe` 3
+      V.length (head result) `shouldBe` 4
 
