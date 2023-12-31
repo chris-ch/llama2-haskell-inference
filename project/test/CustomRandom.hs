@@ -1,12 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 module CustomRandom where
 
-import Data.Vector.Unboxed
 import qualified Data.Vector.Unboxed as V
-import Control.Monad.State
 import qualified Control.Monad as M
+
+import Data.Vector.Unboxed
+import Control.Monad.State
 import Data.Bits
-import Builder
+import NetworkBuilder
 
 -- Define the state type
 type StateRNG = Int

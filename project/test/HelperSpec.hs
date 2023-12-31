@@ -2,7 +2,7 @@
 module HelperSpec (spec) where
 
 import Test.Hspec
-import Builder
+import NetworkBuilder
 import Inference
 import CustomRandom
 

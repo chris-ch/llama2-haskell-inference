@@ -12,7 +12,7 @@ import qualified Data.List.Split as DLS
 import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
 
-import Builder (NetworkConfig(..), AttentionKV(..),
+import NetworkBuilder (NetworkConfig(..), AttentionKV(..),
   Matrix, TransformerWeighting(..),
   initModel, tokenizerInit, bpeEncode)
 import Control.Monad.State ( StateT, evalStateT, MonadState(put), gets )

@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Redundant bracket" #-}
 
-module Builder (
+module NetworkBuilder (
   NetworkConfig(..),
   AttentionKV(..),
   Matrix,
