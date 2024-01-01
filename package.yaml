@@ -35,6 +35,7 @@ dependencies:
   - mtl
   - time
   - parallel
+  - transformers
 
 ghc-options:
   - -Wall

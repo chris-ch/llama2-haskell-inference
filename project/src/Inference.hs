@@ -53,27 +53,6 @@ drawSample seedValue probabilities = do
 
   return $ indexHighestCDF r probabilities
 
-computeQKV :: NetworkConfig -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
-computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
-  let
-    rba = rmsNorm token (rmsAttWeight (weighting network) !! indexLayer)
-    wQ = splitVector (numAttentionHeads network) (matrixVectorMult (wq (weighting network) !! indexLayer) rba)
-    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wQ
-    wK = splitVector (numAttentionHeads network) (matrixVectorMult (wk (weighting network) !! indexLayer) rba)
-    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
-    headsV = splitVector (numAttentionHeads network) (matrixVectorMult (wv (weighting network) !! indexLayer) rba)
-  in
-    (headsQ, headsK, headsV)
-
-multiheadActivation :: NetworkConfig -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
-multiheadActivation network indexLayer kC vC headsQ =
-    [buildActivation hd indexLayer vC indexHead (scores indexHead) | indexHead <- [0 .. numAttentionHeads network - 1]]
-    where
-      hd = headDimension network
-      scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
-        where
-          rawScores = computeScores hd kC indexLayer indexHead headsQ
-
 buildActivation :: Int -> Int -> [[[Vector Float]]] -> Int -> [Float] -> Vector Float
 buildActivation dimension indexLayer vC indexHead headScores =
   DL.foldl' accumulate zeroVector zippedValues
@@ -145,6 +124,27 @@ computeDeltaFFN weights indexLayer token =
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
     in matrixVectorMult weight2 (elementsProduct sigmoided hiddenDimensionBuffer2)
 
+computeQKV :: NetworkConfig -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
+computeQKV network indexLayer freqCisRealRow freqCisImagRow token =
+  let
+    rba = rmsNorm token (rmsAttWeight (weighting network) !! indexLayer)
+    wQ = splitVector (numAttentionHeads network) (matrixVectorMult (wq (weighting network) !! indexLayer) rba)
+    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wQ
+    wK = splitVector (numAttentionHeads network) (matrixVectorMult (wk (weighting network) !! indexLayer) rba)
+    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
+    headsV = splitVector (numAttentionHeads network) (matrixVectorMult (wv (weighting network) !! indexLayer) rba)
+  in
+    (headsQ, headsK, headsV)
+
+multiheadActivation :: NetworkConfig -> Int -> [[[Vector Float]]]-> [[[Vector Float]]] -> [Vector Float] -> Matrix Float
+multiheadActivation network indexLayer kC vC headsQ =
+    [buildActivation hd indexLayer vC indexHead (scores indexHead) | indexHead <- [0 .. numAttentionHeads network - 1]]
+    where
+      hd = headDimension network
+      scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
+        where
+          rawScores = computeScores hd kC indexLayer indexHead headsQ
+
 createLayerToken :: Int -> Int -> Vector Float -> Vector Float -> Vector Float -> ReaderT NetworkConfig (StateT AttentionKV IO) (Vector Float)
 createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
     network <- ask
@@ -156,7 +156,6 @@ createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
         keyCache' = take stepCount kC ++ [keyCacheStep]
         valueCache' = take stepCount vC ++ [valueCacheStep]
         activations = multiheadActivation network indexLayer keyCache' valueCache' headsQ
-    let
         wO = wo (weighting network)
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations)
         token' = V.zipWith (+) token deltaTokenQKV
