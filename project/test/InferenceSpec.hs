@@ -115,7 +115,7 @@ spec = do
         (network, token) = evalState smallQKV 2
         freqCisRealRow = ((freqCisReal (weighting network)) !! 2)
         freqCisImagRow = ((freqCisImag (weighting network)) !! 2)
-        (qs, ks, vs) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
+        (qs, ks, vs) = computeQKV (weighting network) (numAttentionHeads network) indexLayer freqCisRealRow freqCisImagRow token
         rba = rmsNorm token ((rmsAttWeight (weighting network)) !! indexLayer)
         weightsQ = wq (weighting network)
         qVector = matrixVectorMult (weightsQ !! indexLayer) rba
@@ -182,7 +182,7 @@ spec = do
           0.2864671,0.47077942]
 
 
-        result = multiheadActivation network indexLayer cacheKey cacheValue headsQ
+        result = multiheadActivation (numAttentionHeads network) headDim indexLayer cacheKey cacheValue headsQ
 
       activation `shouldBe` V.fromList expectedActivation
 
@@ -269,7 +269,7 @@ spec = do
         freqCisRealRow = ((freqCisReal (weighting network)) !! 2)
         freqCisImagRow = ((freqCisImag (weighting network)) !! 2)
 
-        (q, k, v) = computeQKV network indexLayer freqCisRealRow freqCisImagRow token
+        (q, k, v) = computeQKV (weighting network) (numAttentionHeads network) indexLayer freqCisRealRow freqCisImagRow token
 
       (token', runCache') <- runStateT
         (runReaderT (createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token) network)
@@ -278,7 +278,7 @@ spec = do
       let
         cacheKey' = keyCache (runCache')
         cacheValue' = valueCache (runCache')
-        activations = multiheadActivation network indexLayer cacheKey' cacheValue' q
+        activations = multiheadActivation (numAttentionHeads network) headDim indexLayer cacheKey' cacheValue' q
         deltaTokenQKV = matrixVectorMult ((wo (weighting network)) !! indexLayer) (V.concat activations)
 
       shouldBeSmall 1.0 $ (V.sum deltaTokenQKV) - 2897446.0276938234

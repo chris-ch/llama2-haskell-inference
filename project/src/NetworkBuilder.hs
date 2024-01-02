@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Redundant bracket" #-}
 
@@ -8,7 +7,11 @@ module NetworkBuilder (
   AttentionKV(..),
   Matrix,
   TransformerWeighting(..),
-  initModel, tokenizerInit, bpeEncode, readVectors
+  KeyCache,
+  ValueCache,
+  Vocabulary,
+  PromptTokens,
+  initModel, tokenizerInit, readVectors
   ) where
 
 import qualified Data.ByteString.Lazy as BSL
@@ -25,10 +28,16 @@ import Data.Text (Text)
 import Data.Vector.Unboxed (Vector)
 
 type Matrix a = [Vector a] -- Matrix as row vectors
+type KeyCache = [[Matrix Float]]
+type ValueCache = [[Matrix Float]]
+type Vocabulary = [T.Text]
+type VocabularyScores = [Float]
+type Token = Int
+type PromptTokens = [Token]
 
 data AttentionKV = AttentionKV
-    { keyCache :: [[[Vector Float]]]
-    , valueCache :: [[[Vector Float]]]
+    { keyCache :: KeyCache
+    , valueCache :: ValueCache
     } deriving (Show)
 
 data TransformerWeighting = TransformerWeighting
@@ -72,60 +81,60 @@ readMatrices ndepth nrows ncols = replicateM ndepth (readVectors nrows ncols)
 
 parseNetworkConfigFile :: BG.Get NetworkConfig
 parseNetworkConfigFile = do
-        dim <- getInt32le
-        hiddenDim <- getInt32le
-        nLayers <- getInt32le
-        numAttentionHeads <- getInt32le
-        numKeyValueHeads <- getInt32le
-        vocabSize <- getInt32le
-        seqLen <- getInt32le
-        tokenEmbeddingTable <- readVectors (fromIntegral vocabSize) (fromIntegral dim)
-        rmsAttWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
-        wq <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        wk <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        wv <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        wo <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral dim)
-        rmsFfnWeight <- readVectors (fromIntegral nLayers) (fromIntegral dim)
-        w1 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
-        w2 <- readMatrices (fromIntegral nLayers) (fromIntegral dim) (fromIntegral hiddenDim)
-        w3 <- readMatrices (fromIntegral nLayers) (fromIntegral hiddenDim) (fromIntegral dim)
-        rmsFinalWeight <- readVector (fromIntegral dim)
-        freqCisReal <- readVectors (fromIntegral seqLen) ((fromIntegral dim `div` (fromIntegral numAttentionHeads)) `div` 2)
-        freqCisImag <- readVectors (fromIntegral seqLen) ((fromIntegral dim `div` (fromIntegral numAttentionHeads)) `div` 2)
+        dim' <- fromIntegral <$> getInt32le
+        hiddenDim' <- fromIntegral <$> getInt32le
+        nLayers' <- fromIntegral <$> getInt32le
+        numAttentionHeads' <- fromIntegral <$> getInt32le
+        numKeyValueHeads' <- fromIntegral <$> getInt32le
+        vocabSize' <- fromIntegral <$> getInt32le
+        seqLen' <- fromIntegral <$> getInt32le
+        tokenEmbeddingTable' <- readVectors vocabSize' dim'
+        rmsAttWeight' <- readVectors nLayers' dim'
+        wq' <- readMatrices nLayers' dim' dim'
+        wk' <- readMatrices nLayers' dim' dim'
+        wv' <- readMatrices nLayers' dim' dim'
+        wo' <- readMatrices nLayers' dim' dim'
+        rmsFfnWeight' <- readVectors nLayers' dim'
+        w1' <- readMatrices nLayers' hiddenDim' dim'
+        w2' <- readMatrices nLayers' dim' hiddenDim'
+        w3' <- readMatrices nLayers' hiddenDim' dim'
+        rmsFinalWeight' <- readVector dim'
+        freqCisReal' <- readVectors seqLen' ((dim' `div` (numAttentionHeads')) `div` 2)
+        freqCisImag' <- readVectors seqLen' ((dim' `div` (numAttentionHeads')) `div` 2)
 
         let
-            headDimension = dim `div` numAttentionHeads
-            weighting = TransformerWeighting
-              { tokenEmbeddingTable = tokenEmbeddingTable
-              , rmsAttWeight = rmsAttWeight
-              , wq = wq
-              , wk = wk
-              , wv = wv
-              , wo = wo
-              , rmsFfnWeight = rmsFfnWeight
-              , w1 = w1
-              , w2 = w2
-              , w3 = w3
-              , rmsFinalWeight = rmsFinalWeight
-              , freqCisReal = freqCisReal
-              , freqCisImag = freqCisImag
+            headDim = dim' `div` numAttentionHeads'
+            weights = TransformerWeighting
+              { tokenEmbeddingTable = tokenEmbeddingTable'
+              , rmsAttWeight = rmsAttWeight'
+              , wq = wq'
+              , wk = wk'
+              , wv = wv'
+              , wo = wo'
+              , rmsFfnWeight = rmsFfnWeight'
+              , w1 = w1'
+              , w2 = w2'
+              , w3 = w3'
+              , rmsFinalWeight = rmsFinalWeight'
+              , freqCisReal = freqCisReal'
+              , freqCisImag = freqCisImag'
               }
         return $ NetworkConfig
-            { dim = fromIntegral dim
-            , hiddenDim = fromIntegral hiddenDim
-            , nLayers = fromIntegral nLayers
-            , numAttentionHeads = fromIntegral numAttentionHeads
-            , numKeyValueHeads = fromIntegral numKeyValueHeads
-            , vocabSize = abs (fromIntegral vocabSize)
-            , seqLen = fromIntegral seqLen
-            , headDimension = fromIntegral headDimension
-            , weighting = weighting
+            { dim = dim'
+            , hiddenDim = hiddenDim'
+            , nLayers = nLayers'
+            , numAttentionHeads = numAttentionHeads'
+            , numKeyValueHeads = numKeyValueHeads'
+            , vocabSize = abs vocabSize'
+            , seqLen = seqLen'
+            , headDimension = headDim
+            , weighting = weights
             }
 
 initModel :: BSL.ByteString -> NetworkConfig
 initModel = BG.runGet parseNetworkConfigFile
 
-parseTokens :: BSL.ByteString -> Int -> ([T.Text], [Float])
+parseTokens :: BSL.ByteString -> Int -> (Vocabulary, VocabularyScores)
 parseTokens file size = (vocab, vocabScores)
   where
     readToken :: BG.Get (Float, T.Text)
@@ -141,40 +150,38 @@ parseTokens file size = (vocab, vocabScores)
     vocabScores = fst <$> BG.runGet scoresAndStrings file
     vocab = snd <$> BG.runGet scoresAndStrings file
 
-tokenizerInit :: BSL.ByteString -> Int -> ([T.Text], [Float])
-tokenizerInit file = parseTokens (BSL.drop 4 file)
+tokenizerInit :: BSL.ByteString -> Int -> String -> (PromptTokens, Vocabulary)
+tokenizerInit file size prompt= (bpeEncode (T.pack prompt) vocab vocabScores, vocab)
+  where
+    (vocab, vocabScores) = parseTokens (BSL.drop 4 file) size
 
-strLookup :: Text -> [T.Text] -> Int
+strLookup :: Text -> Vocabulary -> Int
 strLookup occurrence = fromMaybe (-1) . DL.elemIndex occurrence
 
-processTokens :: [Int] -> [T.Text] -> [Float] -> [Int]
-processTokens tokens vocab vocabScores = process tokens
-  where
-    process :: [Int] -> [Int]
-    process tokens' =
-      case findBestPair tokens' of
-        Just (bestIdx, bestId) ->
-          process (mergePair bestIdx bestId tokens')
+processTokens :: [Token] -> Vocabulary -> VocabularyScores -> PromptTokens
+processTokens tokens vocab vocabScores = case findBestPair tokens of
+        Just (bestIndex, bestToken) ->
+          processTokens (mergePair bestIndex bestToken tokens) vocab vocabScores
         Nothing ->
-          tokens'
+          tokens
+    where
+      findBestPair :: [Token] -> Maybe (Int, Int)
+      findBestPair tokens' = foldr checkPair Nothing (zip [0..] (zip tokens' (drop 1 tokens')))
+        where
+          checkPair :: (Int, (Token, Token)) -> Maybe (Int, Int) -> Maybe (Int, Int)
+          checkPair (count, (tokenPrev, tokenNext)) acc =
+            case strLookup ((vocab !! tokenPrev) `T.append` (vocab !! tokenNext)) vocab of
+              pos | pos /= -1 && vocabScores !! pos > bestScore -> Just (count, pos)
+              _ -> acc
 
-    findBestPair :: [Int] -> Maybe (Int, Int)
-    findBestPair tokens' = foldr checkPair Nothing (zip [0..] (zip tokens' (drop 1 tokens')))
-      where
-        checkPair :: (Int, (Int, Int)) -> Maybe (Int, Int) -> Maybe (Int, Int)
-        checkPair (count, (tokenPrev, tokenNext)) acc =
-          case strLookup ((vocab !! tokenPrev) `T.append` (vocab !! tokenNext)) vocab of
-            pos | pos /= -1 && vocabScores !! pos > bestScore -> Just (count, pos)
-            _ -> acc
+          bestScore :: Float
+          bestScore = -1e10
 
-        bestScore :: Float
-        bestScore = -1e10
+      mergePair :: Int -> Token -> [Token] -> [Token]
+      mergePair count token tokens' =
+        take count tokens' ++ [token] ++ drop (count + 2) tokens'
 
-    mergePair :: Int -> Int -> [Int] -> [Int]
-    mergePair idx code tokens' =
-      take idx tokens' ++ [code] ++ drop (idx + 2) tokens'
-
-bpeEncode :: T.Text -> [T.Text] -> [Float] -> [Int]
+bpeEncode :: T.Text -> Vocabulary -> VocabularyScores -> PromptTokens
 bpeEncode prompt vocab vocabScores =
   let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
   in processTokens tokens vocab vocabScores
