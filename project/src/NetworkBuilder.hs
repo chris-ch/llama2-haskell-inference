@@ -11,6 +11,7 @@ module NetworkBuilder (
   ValueCache,
   Vocabulary,
   PromptTokens,
+  Token,
   initModel, tokenizerInit, readVectors
   ) where
 
@@ -25,6 +26,7 @@ import Control.Monad (replicateM)
 import Data.Binary.Get (getInt32le, getFloatle)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
 
 type Matrix a = [Vector a] -- Matrix as row vectors
@@ -32,7 +34,7 @@ type KeyCache = [[Matrix Float]]
 type ValueCache = [[Matrix Float]]
 type Vocabulary = [T.Text]
 type VocabularyScores = [Float]
-type Token = Int
+type Token = Int32
 type PromptTokens = [Token]
 
 data AttentionKV = AttentionKV
@@ -165,13 +167,13 @@ processTokens tokens vocab vocabScores = case findBestPair tokens of
         Nothing ->
           tokens
     where
-      findBestPair :: [Token] -> Maybe (Int, Int)
+      findBestPair :: [Token] -> Maybe (Int, Token)
       findBestPair tokens' = foldr checkPair Nothing (zip [0..] (zip tokens' (drop 1 tokens')))
         where
-          checkPair :: (Int, (Token, Token)) -> Maybe (Int, Int) -> Maybe (Int, Int)
+          checkPair :: (Int, (Token, Token)) -> Maybe (Int, Token) -> Maybe (Int, Token)
           checkPair (count, (tokenPrev, tokenNext)) acc =
-            case strLookup ((vocab !! tokenPrev) `T.append` (vocab !! tokenNext)) vocab of
-              pos | pos /= -1 && vocabScores !! pos > bestScore -> Just (count, pos)
+            case strLookup ((vocab !! (fromIntegral tokenPrev)) `T.append` (vocab !! (fromIntegral tokenNext))) vocab of
+              pos | pos /= -1 && vocabScores !! pos > bestScore -> Just (count, fromIntegral pos)
               _ -> acc
 
           bestScore :: Float
@@ -184,4 +186,4 @@ processTokens tokens vocab vocabScores = case findBestPair tokens of
 bpeEncode :: T.Text -> Vocabulary -> VocabularyScores -> PromptTokens
 bpeEncode prompt vocab vocabScores =
   let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
-  in processTokens tokens vocab vocabScores
+  in processTokens (map fromIntegral tokens) vocab vocabScores

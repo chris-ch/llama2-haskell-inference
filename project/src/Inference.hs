@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Inference (run, computeQKV, rmsNorm, splitVector, 
+module Inference (run, computeQKV, rmsNorm, splitVector,
 computeDeltaFFN, createLayerToken, multiheadActivation,
 buildActivation, applyRotations, matrixVectorMult, transformer,
 softmax, drawSample
@@ -15,7 +15,7 @@ import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
 
 import NetworkBuilder (NetworkConfig(..), AttentionKV(..),
-  Matrix, TransformerWeighting(..), KeyCache, ValueCache, Vocabulary, PromptTokens,
+  Matrix, TransformerWeighting(..), KeyCache, ValueCache, Vocabulary, PromptTokens, Token,
   initModel, tokenizerInit)
 import Control.Monad.State ( StateT, evalStateT, MonadState(put), gets )
 import System.IO (hFlush, stdout)
@@ -40,7 +40,7 @@ softmax values size = V.concat [softmaxValues, V.slice size (V.length values - s
     sumExpValues = V.sum expValues
     softmaxValues = V.map (/ sumExpValues) expValues
 
-drawSample :: Int -> Vector Float -> IO Int
+drawSample :: Int -> Vector Float -> IO Token
 drawSample seedValue probabilities = do
   let
     gen = R.mkStdGen seedValue
@@ -53,7 +53,7 @@ drawSample seedValue probabilities = do
           indexHighest :: Float -> Int -> Int -> Float -> Int
           indexHighest rand' acc i v = if v <= rand' then i + 1 else acc
 
-  return $ indexHighestCDF r probabilities
+  return $ fromIntegral $ indexHighestCDF r probabilities
 
 buildActivation :: Int -> Int -> KeyCache -> Int -> [Float] -> Vector Float
 buildActivation dimension indexLayer vC indexHead headScores =
@@ -162,12 +162,12 @@ createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
     put (AttentionKV {keyCache = keyCache', valueCache = valueCache'})
     return result
 
-transformer :: Int -> Int -> TransformerResult (Vector Float)
+transformer :: Token -> Int -> TransformerResult (Vector Float)
 transformer tokenCode stepCount = do
     network <- ask
 
     -- Getting the token embedding
-    let token = tokenEmbeddingTable (weighting network) !! tokenCode
+    let token = tokenEmbeddingTable (weighting network) !! fromIntegral tokenCode
 
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
     let freqCisRealRow = freqCisReal (weighting network) !! stepCount
@@ -186,20 +186,20 @@ transformer tokenCode stepCount = do
 
     return logits
 
-generateNextToken :: Int -> PromptTokens -> Float -> Vocabulary -> Int -> Int -> TransformerResult (Text, Int)
+generateNextToken :: Int -> PromptTokens -> Float -> Vocabulary -> Token -> Int -> TransformerResult (Text, Token)
 generateNextToken timestep promptTokens temperature vocab tokenCode seedValue = do
   network <- ask
   logits <- transformer tokenCode timestep
   nextToken <- if timestep < length promptTokens
     then return (promptTokens !! timestep)
     else if temperature == 0.0
-      then return (V.maxIndex logits)
+      then return $ fromIntegral (V.maxIndex logits)
     else do
       liftIO $ drawSample seedValue $ softmax (V.map (/ temperature) logits) (vocabSize network)
   let tokenStr =
-        if tokenCode == 1 && C.isSpace (T.head (vocab !! nextToken))
-          then T.tail (vocab !! nextToken)
-          else vocab !! nextToken
+        if tokenCode == 1 && C.isSpace (T.head (vocab !! fromIntegral nextToken))
+          then T.tail (vocab !! fromIntegral nextToken)
+          else vocab !! fromIntegral nextToken
   return (tokenStr, nextToken)
 
 generateTokens :: Int -> PromptTokens -> Float -> Vocabulary -> Int -> TransformerResult ([Text], Int)
