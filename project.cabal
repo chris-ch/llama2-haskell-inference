@@ -1,0 +1,74 @@
+cabal-version:  3.4
+
+name:           llama2
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/chris-ch/llama2-haskell-inference#readme>
+homepage:       https://github.com/githubuser/llama2-haskell-inference#readme
+bug-reports:    https://github.com/githubuser/llama2-haskell-inference/issues
+author:         Christophe Alexandre
+maintainer:     christophe.alexandre@pm.me
+category:       LLM
+copyright:      2023 Christophe Alexandre
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+common shared
+  build-depends: base >=4.7 && <5
+    , array
+    , binary
+    , bytestring
+    , directory
+    , filepath
+    , linear
+    , matrices
+    , mtl
+    , parallel
+    , random
+    , split
+    , text
+    , time
+    , transformers
+    , vector
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -threaded -haddock
+  default-language: Haskell2010
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/llama2-haskell-inference
+
+library
+  import: shared
+  exposed-modules:
+      Inference
+      NetworkBuilder
+  hs-source-dirs:
+      project/src
+
+executable llama2
+  import: shared
+  main-is: Main.hs
+  hs-source-dirs:
+      project/cli-app
+  build-depends: optparse-applicative,
+    llama2
+
+test-suite project-test
+  import: shared
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      CustomRandom
+      HelperSpec
+      InferenceSpec
+      TokenGeneratorSpec
+      Inference
+      NetworkBuilder
+  hs-source-dirs:
+      project/test
+      project/src
+  build-depends: hspec
+
