@@ -38,5 +38,5 @@ They looked and looked. Then, they found the toy car under a tree. Tim was very 
 Running tests matching specifically "FFN":
 
 ```shell
-cabal test --test-show-details="streaming" --keep-going --test-option=--match --test-option="FFN"
+HSPEC_COLOR=yes cabal test --test-show-details="streaming" --keep-going --test-option=--match --test-option="FFN"
 ```

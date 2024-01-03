@@ -2,10 +2,25 @@
 module Main (main) where
 
 import Options.Applicative
+    ( optional,
+      (<**>),
+      auto,
+      fullDesc,
+      help,
+      info,
+      long,
+      metavar,
+      option,
+      strArgument,
+      strOption,
+      value,
+      execParser,
+      helper,
+      Parser )
 import System.IO ( hClose, openFile, IOMode(ReadMode) )
 import qualified Data.ByteString.Lazy as BSL
 import Inference (run)
-import System.Directory
+import System.Directory ( canonicalizePath )
 import Text.Printf (printf)
 
 
