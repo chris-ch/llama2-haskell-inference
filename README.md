@@ -11,16 +11,16 @@ for example the mini stories from [llama.c](https://github.com/karpathy/llama2.c
 wget --directory-prefix=data https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
 ```
 
-### Running llama2 using stack
+### Running llama2 using cabal
 
 ```shell
-stack run -- cli-app --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town"
+cabal run -- llama2 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town"
 ```
 
 For testing purposes, you can set the _seed_ option to some value to always get the same output:
 
 ```shell
-stack run -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town"
+cabal run -- llama2 --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town"
 ```
 
 Generated output for that particular seed:
@@ -33,17 +33,10 @@ They looked and looked. Then, they found the toy car under a tree. Tim was very 
 <s>
 ```
 
-### Debugging / Profiling
-
-```shell
-stack build --profile --executable-profiling
-stack run --profile -- cli-app --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 12 "In that little town" +RTS -p -s -t -N 
-```
-
 ### Unit testing
 
-Running tests matching specifically "Helper":
+Running tests matching specifically "FFN":
 
 ```shell
-stack test --test-arguments='--match "Helper"'
+cabal test --test-show-details="streaming" --keep-going --test-option=--match --test-option="FFN"
 ```

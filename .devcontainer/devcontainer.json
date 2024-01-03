@@ -10,6 +10,5 @@
 	"remoteUser": "haskell",
 	"mounts": [
 		"source=${localEnv:HOME}/.ssh,target=/home/haskell/.ssh,type=bind,readonly"
-	],
-	"postStartCommand": "stack init --force; stack install implicit-hie"
+	]
 }
