@@ -6,7 +6,7 @@ buildActivation, applyRotations, matrixVectorMult, transformer,
 softmax, drawSample
  ) where
 
-import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text as T
 import qualified Data.Char as C
 import qualified Data.List as DL
@@ -216,7 +216,7 @@ generateTokens maxSteps promptTokens temperature vocab seedValue = do
         liftIO $ hFlush stdout
         go network (timestep + 1) (result ++ [tokenStr]) nextToken
 
-run :: BSL.ByteString -> BSL.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
+run :: BS.ByteString -> BS.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileContent tokenizerFileContent temperature steps prompt seed = do
   currentTime <- getPOSIXTime
   let

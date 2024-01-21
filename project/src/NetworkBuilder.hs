@@ -28,6 +28,8 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
+import Control.Arrow ((***))
+import Data.Bifunctor (first)
 
 type Matrix a = [Vector a] -- Matrix as row vectors
 type KeyCache = [[Matrix Float]]
@@ -139,18 +141,19 @@ initModel = BG.runGet parseNetworkConfigFile
 parseTokens :: BS.ByteString -> Int -> (Vocabulary, VocabularyScores)
 parseTokens file size = (vocab, vocabScores)
   where
+    scoresTokens = BG.runGet scoresAndTokens file
+    vocabScores = fst <$> scoresTokens
+    vocab = snd <$> scoresTokens
+
+    scoresAndTokens :: BG.Get [(Float, T.Text)]
+    scoresAndTokens = replicateM size readToken
+
     readToken :: BG.Get (Float, T.Text)
     readToken = do
       score <- BG.getFloatle
       tokenSize <- BG.getInt32le
-      bstr <- TE.decodeUtf8 . BS.toStrict <$> BG.getLazyByteString (fromIntegral tokenSize)
-      return (score, bstr)
-
-    scoresAndStrings :: BG.Get [(Float, T.Text)]
-    scoresAndStrings = replicateM size readToken
-
-    vocabScores = fst <$> BG.runGet scoresAndStrings file
-    vocab = snd <$> BG.runGet scoresAndStrings file
+      token <- TE.decodeUtf8 <$> BG.getByteString (fromIntegral tokenSize)
+      return (score, token)
 
 tokenizerInit :: BS.ByteString -> Int -> String -> (PromptTokens, Vocabulary)
 tokenizerInit file size prompt= (bpeEncode (T.pack prompt) vocab vocabScores, vocab)
