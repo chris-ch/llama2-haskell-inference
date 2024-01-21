@@ -16,25 +16,20 @@ module NetworkBuilder (
   ) where
 
 import qualified Data.ByteString.Lazy as BS
-import qualified Data.Text.Encoding as TE
 import qualified Data.Binary.Get as BG
-import qualified Data.Text as T
 import qualified Data.List as DL
 import qualified Data.Vector.Unboxed as V
 
 import Control.Monad (replicateM)
 import Data.Binary.Get (getInt32le, getFloatle)
 import Data.Maybe (fromMaybe)
-import Data.Text (Text)
 import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
-import Control.Arrow ((***))
-import Data.Bifunctor (first)
 
 type Matrix a = [Vector a] -- Matrix as row vectors
 type KeyCache = [[Matrix Float]]
 type ValueCache = [[Matrix Float]]
-type Vocabulary = [T.Text]
+type Vocabulary = [BS.ByteString]
 type VocabularyScores = [Float]
 type Token = Int32
 type PromptTokens = [Token]
@@ -139,28 +134,28 @@ initModel :: BS.ByteString -> NetworkConfig
 initModel = BG.runGet parseNetworkConfigFile
 
 parseTokens :: BS.ByteString -> Int -> (Vocabulary, VocabularyScores)
-parseTokens file size = (vocab, vocabScores)
+parseTokens fileContent size = (vocab, vocabScores)
   where
-    scoresTokens = BG.runGet scoresAndTokens file
+    scoresTokens = BG.runGet scoresAndTokens fileContent
     vocabScores = fst <$> scoresTokens
     vocab = snd <$> scoresTokens
 
-    scoresAndTokens :: BG.Get [(Float, T.Text)]
+    scoresAndTokens :: BG.Get [(Float, BS.ByteString)]
     scoresAndTokens = replicateM size readToken
 
-    readToken :: BG.Get (Float, T.Text)
+    readToken :: BG.Get (Float, BS.ByteString)
     readToken = do
       score <- BG.getFloatle
       tokenSize <- BG.getInt32le
-      token <- TE.decodeUtf8 <$> BG.getByteString (fromIntegral tokenSize)
+      token <- BG.getLazyByteString (fromIntegral tokenSize)
       return (score, token)
 
-tokenizerInit :: BS.ByteString -> Int -> String -> (PromptTokens, Vocabulary)
-tokenizerInit file size prompt= (bpeEncode (T.pack prompt) vocab vocabScores, vocab)
+tokenizerInit :: BS.ByteString -> Int -> BS.ByteString -> (PromptTokens, Vocabulary)
+tokenizerInit file size prompt = (bpeEncode prompt vocab vocabScores, vocab)
   where
     (vocab, vocabScores) = parseTokens (BS.drop 4 file) size
 
-strLookup :: Text -> Vocabulary -> Int
+strLookup :: BS.ByteString -> Vocabulary -> Int
 strLookup occurrence = fromMaybe (-1) . DL.elemIndex occurrence
 
 processTokens :: [Token] -> Vocabulary -> VocabularyScores -> PromptTokens
@@ -175,7 +170,7 @@ processTokens tokens vocab vocabScores = case findBestPair tokens of
         where
           checkPair :: (Int, (Token, Token)) -> Maybe (Int, Token) -> Maybe (Int, Token)
           checkPair (count, (tokenPrev, tokenNext)) acc =
-            case strLookup ((vocab !! (fromIntegral tokenPrev)) `T.append` (vocab !! (fromIntegral tokenNext))) vocab of
+            case strLookup ((vocab !! (fromIntegral tokenPrev)) `BS.append` (vocab !! (fromIntegral tokenNext))) vocab of
               pos | pos /= -1 && vocabScores !! pos > bestScore -> Just (count, fromIntegral pos)
               _ -> acc
 
@@ -186,7 +181,7 @@ processTokens tokens vocab vocabScores = case findBestPair tokens of
       mergePair count token tokens' =
         take count tokens' ++ [token] ++ drop (count + 2) tokens'
 
-bpeEncode :: T.Text -> Vocabulary -> VocabularyScores -> PromptTokens
+bpeEncode :: BS.ByteString -> Vocabulary -> VocabularyScores -> PromptTokens
 bpeEncode prompt vocab vocabScores =
-  let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (T.pack [char]) vocab)) (T.unpack prompt)
+  let tokens = map (\char -> fromMaybe (error "Character not found in vocabulary") (DL.elemIndex (BS.pack [char]) vocab)) (BS.unpack prompt)
   in processTokens (map fromIntegral tokens) vocab vocabScores

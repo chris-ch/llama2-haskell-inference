@@ -18,7 +18,6 @@ import Options.Applicative
       helper,
       Parser )
 import System.IO ( hClose, openFile, IOMode(ReadMode) )
-import qualified Data.ByteString.Lazy as BS
 import Inference (run)
 import System.Directory ( canonicalizePath )
 import Text.Printf (printf)
@@ -49,11 +48,7 @@ main = do
     modelFileHandle <- openFile modelFile ReadMode
     tokenizerFileHandle <- openFile tokenizerFile ReadMode
     tokenizerAbsolutePath <- canonicalizePath tokenizerFile
-    printf "loading model file %s\n" modelFile
-    modelFileContent <- BS.hGetContents modelFileHandle
-    printf "loading tokenizer %s\n" tokenizerAbsolutePath
-    tokenizerFileContent <- BS.hGetContents tokenizerFileHandle
-    putStrLn "running inference..."
-    Inference.run modelFileContent tokenizerFileContent (realToFrac temperature) steps prompt seed
+    printf "using tokenizer %s\n" tokenizerAbsolutePath
+    Inference.run modelFileHandle tokenizerFileHandle (realToFrac temperature) steps prompt seed
     hClose modelFileHandle
     hClose tokenizerFileHandle

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Inference (run, computeQKV, rmsNorm, splitVector,
 computeDeltaFFN, createLayerToken, multiheadActivation,
@@ -7,8 +8,7 @@ softmax, drawSample
  ) where
 
 import qualified Data.ByteString.Lazy as BS
-import qualified Data.Text as T
-import qualified Data.Char as C
+import qualified Data.ByteString.Lazy.Char8 as BSC
 import qualified Data.List as DL
 import qualified Data.List.Split as DLS
 import qualified System.Random as R
@@ -22,13 +22,14 @@ import System.IO (hFlush, stdout)
 import Control.Monad (foldM)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe)
-import Data.Text (Text)
 import Data.Vector.Unboxed (Vector)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Control.Monad.Reader
     ( MonadIO(liftIO),
       ReaderT(runReaderT),
       MonadReader(ask) )
+import GHC.IO.Handle (Handle)
+import GHC.Unicode (isSpace)
 
 type TransformerResult a = ReaderT NetworkConfig (StateT AttentionKV IO) a
 
@@ -186,7 +187,7 @@ transformer tokenCode stepCount = do
 
     return logits
 
-generateNextToken :: Int -> PromptTokens -> Float -> Vocabulary -> Token -> Int -> TransformerResult (Text, Token)
+generateNextToken :: Int -> PromptTokens -> Float -> Vocabulary -> Token -> Int -> TransformerResult (BS.ByteString, Token)
 generateNextToken timestep promptTokens temperature vocab tokenCode seedValue = do
   network <- ask
   logits <- transformer tokenCode timestep
@@ -196,13 +197,15 @@ generateNextToken timestep promptTokens temperature vocab tokenCode seedValue = 
       then return $ fromIntegral (V.maxIndex logits)
     else do
       liftIO $ drawSample seedValue $ softmax (V.map (/ temperature) logits) (vocabSize network)
-  let tokenStr =
-        if tokenCode == 1 && C.isSpace (T.head (vocab !! fromIntegral nextToken))
-          then T.tail (vocab !! fromIntegral nextToken)
+  let
+    word = vocab !! fromIntegral nextToken :: BS.ByteString
+    firstChar = BSC.head word :: Char
+    tokenStr = if tokenCode == 1 && isSpace firstChar
+          then BSC.tail (vocab !! fromIntegral nextToken)
           else vocab !! fromIntegral nextToken
   return (tokenStr, nextToken)
 
-generateTokens :: Int -> PromptTokens -> Float -> Vocabulary -> Int -> TransformerResult ([Text], Int)
+generateTokens :: Int -> PromptTokens -> Float -> Vocabulary -> Int -> TransformerResult ([BS.ByteString], Int)
 generateTokens maxSteps promptTokens temperature vocab seedValue = do
   network <- ask
   go network 0 [] 1 where
@@ -212,17 +215,23 @@ generateTokens maxSteps promptTokens temperature vocab seedValue = do
         (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
         put (AttentionKV {keyCache = take timestep kC ++ [[]], valueCache = take timestep vC ++ [[]]})
         (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature vocab token seedValue
-        liftIO $ printf "%s" tokenStr
+        liftIO $ printf "%s" (BSC.unpack tokenStr)
         liftIO $ hFlush stdout
         go network (timestep + 1) (result ++ [tokenStr]) nextToken
 
-run :: BS.ByteString -> BS.ByteString -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
-run modelFileContent tokenizerFileContent temperature steps prompt seed = do
+run :: Handle -> Handle -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
+run modelFileHandle tokenizerFileHandle temperature steps prompt seed = do
   currentTime <- getPOSIXTime
+
+  modelFileContent <- BS.hGetContents modelFileHandle
+  tokenizerFileContent <- BS.hGetContents tokenizerFileHandle
+  putStrLn "running inference..."
+
   let
     seedValue = fromMaybe (round currentTime) seed
     config = initModel modelFileContent
-    (promptTokens, vocab) = tokenizerInit tokenizerFileContent (vocabSize config) (fromMaybe "" prompt)
+    prompt' = fromMaybe "" prompt
+    (promptTokens, vocab) = tokenizerInit tokenizerFileContent (vocabSize config) (BSC.pack prompt')
     initStateAttentionKV :: AttentionKV
     initStateAttentionKV = AttentionKV { keyCache = [], valueCache = [] }
   printf "network: # layers %d\n" (nLayers config)
