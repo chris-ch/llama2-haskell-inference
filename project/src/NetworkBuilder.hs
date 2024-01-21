@@ -15,7 +15,7 @@ module NetworkBuilder (
   initModel, tokenizerInit, readVectors
   ) where
 
-import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text.Encoding as TE
 import qualified Data.Binary.Get as BG
 import qualified Data.Text as T
@@ -133,17 +133,17 @@ parseNetworkConfigFile = do
             , weighting = weights
             }
 
-initModel :: BSL.ByteString -> NetworkConfig
+initModel :: BS.ByteString -> NetworkConfig
 initModel = BG.runGet parseNetworkConfigFile
 
-parseTokens :: BSL.ByteString -> Int -> (Vocabulary, VocabularyScores)
+parseTokens :: BS.ByteString -> Int -> (Vocabulary, VocabularyScores)
 parseTokens file size = (vocab, vocabScores)
   where
     readToken :: BG.Get (Float, T.Text)
     readToken = do
       score <- BG.getFloatle
       tokenSize <- BG.getInt32le
-      bstr <- TE.decodeUtf8 . BSL.toStrict <$> BG.getLazyByteString (fromIntegral tokenSize)
+      bstr <- TE.decodeUtf8 . BS.toStrict <$> BG.getLazyByteString (fromIntegral tokenSize)
       return (score, bstr)
 
     scoresAndStrings :: BG.Get [(Float, T.Text)]
@@ -152,10 +152,10 @@ parseTokens file size = (vocab, vocabScores)
     vocabScores = fst <$> BG.runGet scoresAndStrings file
     vocab = snd <$> BG.runGet scoresAndStrings file
 
-tokenizerInit :: BSL.ByteString -> Int -> String -> (PromptTokens, Vocabulary)
+tokenizerInit :: BS.ByteString -> Int -> String -> (PromptTokens, Vocabulary)
 tokenizerInit file size prompt= (bpeEncode (T.pack prompt) vocab vocabScores, vocab)
   where
-    (vocab, vocabScores) = parseTokens (BSL.drop 4 file) size
+    (vocab, vocabScores) = parseTokens (BS.drop 4 file) size
 
 strLookup :: Text -> Vocabulary -> Int
 strLookup occurrence = fromMaybe (-1) . DL.elemIndex occurrence

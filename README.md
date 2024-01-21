@@ -11,6 +11,12 @@ for example the mini stories from [llama.c](https://github.com/karpathy/llama2.c
 wget --directory-prefix=data https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
 ```
 
+There is also a bigger version, for better stories:
+
+```shell
+wget --directory-prefix=data https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin
+```
+
 ### Running llama2 using cabal
 
 ```shell

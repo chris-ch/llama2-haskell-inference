@@ -90,7 +90,7 @@ rmsNorm :: Vector Float -> Vector Float -> Vector Float
 rmsNorm vector weights =
   let
     squareNorm :: Vector Float -> Float
-    squareNorm = V.foldl cumSumSquare 0.0
+    squareNorm = V.foldl' cumSumSquare 0.0
       where
         cumSumSquare :: Float -> Float -> Float
         cumSumSquare acc v = acc + v ^ (2::Int)
