@@ -57,8 +57,8 @@ drawSample seedValue probabilities = do
 
   return $ fromIntegral $ indexHighestCDF r probabilities
 
-buildActivation :: Int -> Int -> KeyCache -> Int -> [Float] -> Vector Float
-buildActivation dimension indexLayer vC indexHead headScores =
+buildActivation :: Int -> ValueCache -> Int -> Int -> [Float] -> Vector Float
+buildActivation dimension vC indexLayer indexHead headScores =
   DL.foldl' accumulate zeroVector zippedValues
   where
     accumulate :: Vector Float -> (Vector Float, Float) -> Vector Float
@@ -140,7 +140,7 @@ computeScores headDim kC indexLayer indexHead headsQ = V.fromList $ map calculat
 
 multiheadActivation :: Int -> Int -> Int -> KeyCache-> ValueCache -> [Vector Float] -> Matrix Float
 multiheadActivation numHeads headDim indexLayer kC vC headsQ =
-    [buildActivation headDim indexLayer vC indexHead (scores indexHead) | indexHead <- [0 .. numHeads - 1]]
+    [buildActivation headDim vC indexLayer indexHead (scores indexHead) | indexHead <- [0 .. numHeads - 1]]
     where
       scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
         where

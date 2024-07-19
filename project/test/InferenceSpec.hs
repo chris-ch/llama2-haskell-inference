@@ -171,7 +171,7 @@ spec = do
         indexLayer = 2::Int
         (network, headsQ, cacheKey, cacheValue) = evalState networkForActivation 2
         headScoresExample = [0.5194815185588364, 0.48051848144116366]
-        activation = buildActivation headDim indexLayer cacheValue 3 headScoresExample
+        activation = buildActivation headDim cacheValue indexLayer 3 headScoresExample
 
         expectedActivation = [0.3045971,0.28449363,0.48838997,0.26805186,0.7258309,0.5840917,
           0.678182,0.6833122,0.7507793,0.48202664,0.26566213,0.4568178,0.32925987,0.72464937,
