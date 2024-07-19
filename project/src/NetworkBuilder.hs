@@ -12,6 +12,7 @@ module NetworkBuilder (
   Vocabulary,
   PromptTokens,
   Token,
+  TokenVector,
   initModel, tokenizerInit, readVectors
   ) where
 
@@ -33,6 +34,7 @@ type Vocabulary = [BS.ByteString]
 type VocabularyScores = [Float]
 type Token = Int32
 type PromptTokens = [Token]
+type TokenVector = Vector Float
 
 data AttentionKV = AttentionKV
     { keyCache :: KeyCache
@@ -40,7 +42,7 @@ data AttentionKV = AttentionKV
     } deriving (Show)
 
 data TransformerWeighting = TransformerWeighting
-    { tokenEmbeddingTable :: Matrix Float
+    { tokenEmbeddingTable :: [TokenVector]
     , rmsAttWeight :: [Vector Float]
     , wq :: [Matrix Float]
     , wk :: [Matrix Float]
@@ -89,10 +91,13 @@ parseNetworkConfigFile = do
         seqLen' <- fromIntegral <$> getInt32le
         tokenEmbeddingTable' <- readVectors vocabSize' dim'
         rmsAttWeight' <- readVectors nLayers' dim'
-        wq' <- readMatrices nLayers' dim' dim'
-        wk' <- readMatrices nLayers' dim' dim'
-        wv' <- readMatrices nLayers' dim' dim'
-        wo' <- readMatrices nLayers' dim' dim'
+        
+        let headSize = dim' `div`numAttentionHeads'
+
+        wq' <- readMatrices nLayers' (numAttentionHeads' * headSize) dim'
+        wk' <- readMatrices nLayers' (numKeyValueHeads' * headSize) dim'
+        wv' <- readMatrices nLayers' (numKeyValueHeads' * headSize) dim'
+        wo' <- readMatrices nLayers' dim' (numAttentionHeads' * headSize)
         rmsFfnWeight' <- readVectors nLayers' dim'
         w1' <- readMatrices nLayers' hiddenDim' dim'
         w2' <- readMatrices nLayers' dim' hiddenDim'
@@ -102,7 +107,6 @@ parseNetworkConfigFile = do
         freqCisImag' <- readVectors seqLen' ((dim' `div` (numAttentionHeads')) `div` 2)
 
         let
-            headDim = dim' `div` numAttentionHeads'
             weights = TransformerWeighting
               { tokenEmbeddingTable = tokenEmbeddingTable'
               , rmsAttWeight = rmsAttWeight'
@@ -126,7 +130,7 @@ parseNetworkConfigFile = do
             , numKeyValueHeads = numKeyValueHeads'
             , vocabSize = abs vocabSize'
             , seqLen = seqLen'
-            , headDimension = headDim
+            , headDimension = headSize
             , weighting = weights
             }
 

@@ -24,7 +24,7 @@ import Inference
       splitVector,
       rmsNorm,
       computeDeltaFFN,
-      createLayerToken )
+      createTokenVectorForLayer )
 import CustomRandom
     ( CustomRNG, generateRandomVector, buildRandomNetworkConfig )
 
@@ -272,7 +272,7 @@ spec = do
         (q, k, v) = computeQKV (weighting network) (numAttentionHeads network) indexLayer freqCisRealRow freqCisImagRow token
 
       (token', runCache') <- runStateT
-        (runReaderT (createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token) network)
+        (runReaderT (createTokenVectorForLayer stepCount indexLayer freqCisRealRow freqCisImagRow token) network)
         (AttentionKV { keyCache = cacheKey, valueCache = cacheValue })
 
       let

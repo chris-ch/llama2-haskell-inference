@@ -1,8 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE BangPatterns #-}
 
 module Inference (run, computeQKV, rmsNorm, splitVector,
-computeDeltaFFN, createLayerToken, multiheadActivation,
+computeDeltaFFN, createTokenVectorForLayer, multiheadActivation,
 buildActivation, applyRotations, matrixVectorMult, transformer,
 softmax, drawSample
  ) where
@@ -15,7 +14,7 @@ import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
 
 import NetworkBuilder (NetworkConfig(..), AttentionKV(..),
-  Matrix, TransformerWeighting(..), KeyCache, ValueCache, Vocabulary, PromptTokens, Token,
+  Matrix, TransformerWeighting(..), KeyCache, ValueCache, Vocabulary, PromptTokens, Token, TokenVector,
   initModel, tokenizerInit)
 import Control.Monad.State ( StateT, evalStateT, MonadState(put), gets )
 import System.IO (hFlush, stdout)
@@ -32,6 +31,8 @@ import GHC.IO.Handle (Handle)
 import GHC.Unicode (isSpace)
 
 type TransformerResult a = ReaderT NetworkConfig (StateT AttentionKV IO) a
+
+type LogitsVector = Vector Float
 
 softmax :: Vector Float -> Int -> Vector Float
 softmax values size = V.concat [softmaxValues, V.slice size (V.length values - size) values]
@@ -100,21 +101,22 @@ rmsNorm vector weights =
     normalized = V.map (* (1.0 / sqrt ss)) vector
   in V.zipWith (*) weights normalized
 
-computeDeltaFFN :: TransformerWeighting -> Int -> Vector Float -> Vector Float
+computeDeltaFFN :: TransformerWeighting -> Int -> TokenVector -> Vector Float
 computeDeltaFFN weights indexLayer token =
     let
       sigmoidLinearUnit :: Float -> Float
       sigmoidLinearUnit value = value / (1.0 + exp (-value))
 
-      rmsFFNWeight = rmsFfnWeight weights !! indexLayer
-      weight1 = w1 weights !! indexLayer
-      weight2 = w2 weights !! indexLayer
-      weight3 = w3 weights !! indexLayer
-      rba = rmsNorm token rmsFFNWeight
-      hiddenDimensionBuffer1 = matrixVectorMult weight1 rba
-      hiddenDimensionBuffer2 = matrixVectorMult weight3 rba
-      sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
-    in matrixVectorMult weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
+      rmsFFNWeight = rmsFfnWeight weights !! indexLayer :: Vector Float
+      weight1 = w1 weights !! indexLayer :: Matrix Float
+      weight2 = w2 weights !! indexLayer :: Matrix Float
+      weight3 = w3 weights !! indexLayer :: Matrix Float
+      rba = rmsNorm token rmsFFNWeight :: Vector Float
+      hiddenDimensionBuffer1 = matrixVectorMult weight1 rba :: Vector Float
+      hiddenDimensionBuffer2 = matrixVectorMult weight3 rba :: Vector Float
+      sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1 :: Vector Float
+    in
+      matrixVectorMult weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
 
 computeQKV :: TransformerWeighting -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
 computeQKV weights numHeads indexLayer freqCisRealRow freqCisImagRow token =
@@ -144,8 +146,8 @@ multiheadActivation numHeads headDim indexLayer kC vC headsQ =
         where
           rawScores = computeScores headDim kC indexLayer indexHead headsQ
 
-createLayerToken :: Int -> Int -> Vector Float -> Vector Float -> Vector Float -> TransformerResult (Vector Float)
-createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
+createTokenVectorForLayer :: Int -> Int -> Vector Float -> Vector Float -> TokenVector -> TransformerResult TokenVector
+createTokenVectorForLayer stepCount indexLayer freqCisRealRow freqCisImagRow token = do
     network <- ask
     (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
     let
@@ -157,42 +159,42 @@ createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
         activations = multiheadActivation (numAttentionHeads network) (headDimension network) indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations)
-        token' = V.zipWith (+) token deltaTokenQKV
-        deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token'
-        result = V.zipWith (+) token' deltaTokenFFN
+        token' = V.zipWith (+) token deltaTokenQKV :: TokenVector
+        deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token' :: Vector Float
+        result = V.zipWith (+) token' deltaTokenFFN :: TokenVector
     put (AttentionKV {keyCache = keyCache', valueCache = valueCache'})
     return result
 
-transformer :: Token -> Int -> TransformerResult (Vector Float)
-transformer tokenCode stepCount = do
+transformer :: Int -> Token -> TransformerResult LogitsVector
+transformer tokenCount tokenCode = do
     network <- ask
 
     -- Getting the token embedding
-    let token = tokenEmbeddingTable (weighting network) !! fromIntegral tokenCode
+    let token = tokenEmbeddingTable (weighting network) !! fromIntegral tokenCode :: TokenVector
 
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
-    let freqCisRealRow = freqCisReal (weighting network) !! stepCount
-    let freqCisImagRow = freqCisImag (weighting network) !! stepCount
+    let freqCisRealRow = freqCisReal (weighting network) !! tokenCount :: Vector Float
+    let freqCisImagRow = freqCisImag (weighting network) !! tokenCount :: Vector Float
 
     -- Forwarding all the layers
-    finalToken <- foldM (\accToken indexLayer -> createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow accToken)
+    finalToken <- foldM (\accToken indexLayer -> createTokenVectorForLayer tokenCount indexLayer freqCisRealRow freqCisImagRow accToken)
                   token
                   [0..nLayers network - 1]
 
     -- Final rmsnorm
-    let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network)
+    let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network) :: TokenVector
 
     -- Classifier into logits
-    let logits = matrixVectorMult (tokenEmbeddingTable (weighting network)) tokenWithRms
+    let logits = matrixVectorMult (tokenEmbeddingTable (weighting network)) tokenWithRms :: LogitsVector
 
     return logits
 
 generateNextToken :: Int -> PromptTokens -> Float -> Vocabulary -> Token -> Int -> TransformerResult (BS.ByteString, Token)
-generateNextToken timestep promptTokens temperature vocab tokenCode seedValue = do
+generateNextToken countToken promptTokens temperature vocab tokenCode seedValue = do
   network <- ask
-  logits <- transformer tokenCode timestep
-  nextToken <- if timestep < length promptTokens
-    then return (promptTokens !! timestep)
+  logits <- transformer countToken tokenCode
+  nextToken <- if countToken < length promptTokens
+    then return (promptTokens !! countToken)
     else if temperature == 0.0
       then return $ fromIntegral (V.maxIndex logits)
     else do
@@ -206,21 +208,21 @@ generateNextToken timestep promptTokens temperature vocab tokenCode seedValue = 
   return (tokenStr, nextToken)
 
 generateTokens :: Int -> PromptTokens -> Float -> Vocabulary -> Int -> TransformerResult ([BS.ByteString], Int)
-generateTokens maxSteps promptTokens temperature vocab seedValue = do
+generateTokens maxTokens promptTokens temperature vocab seedValue = do
   network <- ask
   go network 0 [] 1 where
-    go network timestep result token
-      | timestep >= maxSteps || (timestep /= 0 && token == 1) = return (result, timestep)
+    go network countToken result token
+      | countToken >= maxTokens || (countToken /= 0 && token == 1) = return (result, countToken)
       | otherwise = do
         (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
-        put (AttentionKV {keyCache = take timestep kC ++ [[]], valueCache = take timestep vC ++ [[]]})
-        (tokenStr, nextToken) <- generateNextToken timestep promptTokens temperature vocab token seedValue
+        put (AttentionKV {keyCache = take countToken kC ++ [[]], valueCache = take countToken vC ++ [[]]})
+        (tokenStr, nextToken) <- generateNextToken countToken promptTokens temperature vocab token seedValue
         liftIO $ printf "%s" (BSC.unpack tokenStr)
         liftIO $ hFlush stdout
-        go network (timestep + 1) (result ++ [tokenStr]) nextToken
+        go network (countToken + 1) (result ++ [tokenStr]) nextToken
 
 run :: Handle -> Handle -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
-run modelFileHandle tokenizerFileHandle temperature steps prompt seed = do
+run modelFileHandle tokenizerFileHandle temperature maxTokens prompt seed = do
   currentTime <- getPOSIXTime
 
   modelFileContent <- BS.hGetContents modelFileHandle
@@ -236,12 +238,13 @@ run modelFileHandle tokenizerFileHandle temperature steps prompt seed = do
     initStateAttentionKV = AttentionKV { keyCache = [], valueCache = [] }
   printf "network: # layers %d\n" (nLayers config)
   printf "network: # attention heads %d / head dimension %d\n" (numAttentionHeads config) (headDimension config)
-  printf "network: vocabulary size %d\n" (vocabSize config)
+  printf "network: vocabulary size %d\n" $ vocabSize config
+  printf "network: token dimensions %d\n" $ dim config
   printf "prompt tokens: %s\n" $ show promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
   putStrLn "<s>"
   startTime <- getPOSIXTime
-  (_, countTokens) <- evalStateT (runReaderT (generateTokens steps promptTokens temperature vocab seedValue) config) initStateAttentionKV
+  (_, countTokens) <- evalStateT (runReaderT (generateTokens maxTokens promptTokens temperature vocab seedValue) config) initStateAttentionKV
   endTime <- getPOSIXTime
   let
     duration :: Integer
