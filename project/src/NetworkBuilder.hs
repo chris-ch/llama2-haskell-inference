@@ -27,7 +27,7 @@ import Data.Maybe (fromMaybe)
 import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
 
-type Matrix a = [Vector a] -- Matrix as row vectors
+type Matrix a = [Vector a]
 type KeyCache = [[Matrix Float]]
 type ValueCache = [[Matrix Float]]
 type Vocabulary = [BS.ByteString]

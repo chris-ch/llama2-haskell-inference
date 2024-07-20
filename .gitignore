@@ -21,3 +21,4 @@ cabal.sandbox.config
 data
 *.bin
 *.pyc
+__pycache__

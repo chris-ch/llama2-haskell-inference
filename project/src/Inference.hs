@@ -147,15 +147,15 @@ multiheadActivation numHeads headDim indexLayer kC vC headsQ =
           rawScores = computeScores headDim kC indexLayer indexHead headsQ
 
 createTokenVectorForLayer :: Int -> Int -> Vector Float -> Vector Float -> TokenVector -> TransformerResult TokenVector
-createTokenVectorForLayer stepCount indexLayer freqCisRealRow freqCisImagRow token = do
+createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow token = do
     network <- ask
     (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
     let
         (headsQ, headsK, headsV) = computeQKV (weighting network) (numAttentionHeads network) indexLayer freqCisRealRow freqCisImagRow token
-        keyCacheStep = (kC !! stepCount) ++ [headsK]
-        valueCacheStep = (vC !! stepCount) ++ [headsV]
-        keyCache' = take stepCount kC ++ [keyCacheStep]
-        valueCache' = take stepCount vC ++ [valueCacheStep]
+        keyCacheStep = (kC !! indexToken) ++ [headsK]
+        valueCacheStep = (vC !! indexToken) ++ [headsV]
+        keyCache' = take indexToken kC ++ [keyCacheStep]
+        valueCache' = take indexToken vC ++ [valueCacheStep]
         activations = multiheadActivation (numAttentionHeads network) (headDimension network) indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
         deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations)
@@ -166,18 +166,18 @@ createTokenVectorForLayer stepCount indexLayer freqCisRealRow freqCisImagRow tok
     return result
 
 transformer :: Int -> Token -> TransformerResult LogitsVector
-transformer tokenCount tokenCode = do
+transformer indexToken tokenCode = do
     network <- ask
 
     -- Getting the token embedding
     let token = tokenEmbeddingTable (weighting network) !! fromIntegral tokenCode :: TokenVector
 
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
-    let freqCisRealRow = freqCisReal (weighting network) !! tokenCount :: Vector Float
-    let freqCisImagRow = freqCisImag (weighting network) !! tokenCount :: Vector Float
+    let freqCisRealRow = freqCisReal (weighting network) !! indexToken :: Vector Float
+    let freqCisImagRow = freqCisImag (weighting network) !! indexToken :: Vector Float
 
     -- Forwarding all the layers
-    finalToken <- foldM (\accToken indexLayer -> createTokenVectorForLayer tokenCount indexLayer freqCisRealRow freqCisImagRow accToken)
+    finalToken <- foldM (\accToken indexLayer -> createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow accToken)
                   token
                   [0..nLayers network - 1]
 
@@ -190,11 +190,11 @@ transformer tokenCount tokenCode = do
     return logits
 
 generateNextToken :: Int -> PromptTokens -> Float -> Vocabulary -> Token -> Int -> TransformerResult (BS.ByteString, Token)
-generateNextToken countToken promptTokens temperature vocab tokenCode seedValue = do
+generateNextToken indexToken promptTokens temperature vocab tokenCode seedValue = do
   network <- ask
-  logits <- transformer countToken tokenCode
-  nextToken <- if countToken < length promptTokens
-    then return (promptTokens !! countToken)
+  logits <- transformer indexToken tokenCode
+  nextToken <- if indexToken < length promptTokens
+    then return (promptTokens !! indexToken)
     else if temperature == 0.0
       then return $ fromIntegral (V.maxIndex logits)
     else do
@@ -211,15 +211,15 @@ generateTokens :: Int -> PromptTokens -> Float -> Vocabulary -> Int -> Transform
 generateTokens maxTokens promptTokens temperature vocab seedValue = do
   network <- ask
   go network 0 [] 1 where
-    go network countToken result token
-      | countToken >= maxTokens || (countToken /= 0 && token == 1) = return (result, countToken)
+    go network indexToken result token
+      | indexToken >= maxTokens || (indexToken /= 0 && token == 1) = return (result, indexToken)
       | otherwise = do
         (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
-        put (AttentionKV {keyCache = take countToken kC ++ [[]], valueCache = take countToken vC ++ [[]]})
-        (tokenStr, nextToken) <- generateNextToken countToken promptTokens temperature vocab token seedValue
+        put (AttentionKV {keyCache = take indexToken kC ++ [[]], valueCache = take indexToken vC ++ [[]]})
+        (tokenStr, nextToken) <- generateNextToken indexToken promptTokens temperature vocab token seedValue
         liftIO $ printf "%s" (BSC.unpack tokenStr)
         liftIO $ hFlush stdout
-        go network (countToken + 1) (result ++ [tokenStr]) nextToken
+        go network (indexToken + 1) (result ++ [tokenStr]) nextToken
 
 run :: Handle -> Handle -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileHandle tokenizerFileHandle temperature maxTokens prompt seed = do
