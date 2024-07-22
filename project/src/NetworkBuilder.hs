@@ -4,7 +4,7 @@
 
 module NetworkBuilder (
   NetworkConfig(..),
-  AttentionKV(..),
+  AttentionKV(..), SAttentionKV(..),
   Matrix,
   TransformerWeighting(..),
   KeyCache,
@@ -26,10 +26,12 @@ import Data.Binary.Get (getInt32le, getFloatle)
 import Data.Maybe (fromMaybe)
 import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
+import Data.Array.ST (STUArray)
+import GHC.Base (Any)
 
 type Matrix a = [Vector a]
-type KeyCache = [[Matrix Float]]
-type ValueCache = [[Matrix Float]]
+type KeyCache = [[[Vector Float]]]
+type ValueCache = [[[Vector Float]]]
 type Vocabulary = [BS.ByteString]
 type VocabularyScores = [Float]
 type Token = Int32
@@ -39,7 +41,13 @@ type TokenVector = Vector Float
 data AttentionKV = AttentionKV
     { keyCache :: KeyCache
     , valueCache :: ValueCache
-    } deriving (Show)
+    }
+
+-- indices: (token index, layer index, head index, head component)
+data SAttentionKV s = SAttentionKV
+    { sKeyCache :: STUArray s (Int, Int, Int, Int) Float
+    , sValueCache :: STUArray s (Int, Int, Int, Int) Float
+    }
 
 data TransformerWeighting = TransformerWeighting
     { tokenEmbeddingTable :: [TokenVector]

@@ -39,7 +39,7 @@ optionsParser = Options
     <*> strOption (long "tokenizer-file" <> value "./data/tokenizer.bin" <> help "Tokenizer binary file")
     <*> strOption (long "model-file" <> value "./data/stories15M.bin" <> metavar "MODEL_FILE" <> help "Model binary file")
     <*> option auto (long "temperature" <> value 0.0 <> metavar "TEMPERATURE" <> help "Temperature")
-    <*> option auto (long "steps" <> value 256 <> metavar "STEPS" <> help "Number of steps")
+    <*> option auto (long "steps" <> value 256 <> metavar "STEPS" <> help "Maximum number of tokens")
     <*> optional (strArgument (metavar "PROMPT" <> help "Initial prompt"))
 
 main :: IO ()

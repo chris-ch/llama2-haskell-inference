@@ -38,6 +38,7 @@ common shared
     matrices >= 0.5.0 && < 0.6,
     split >= 0.2.5 && < 0.3,
     optparse-applicative >= 0.18.1 && < 0.19,
+    STMonadTrans >= 0.4.8 && < 0.5,
     conduit,
     conduit-extra
   ghc-options:
