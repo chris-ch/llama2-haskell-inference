@@ -41,7 +41,6 @@ import GHC.IO.Handle (Handle)
 import GHC.Unicode (isSpace)
 import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Data.STRef (STRef, readSTRef, newSTRef, writeSTRef, modifySTRef')
-
 import Control.Monad.ST.Trans (STT(..), runSTT, readSTArray)
 import Control.Monad.ST (ST, runST, RealWorld, stToIO)
 import qualified Data.Array.Unboxed as DAU
@@ -170,12 +169,12 @@ multiheadActivation'' numHeads headDim indexLayer kC vC headsQ =
           rawScores = V.fromList $ computeScores headDim indexLayer index headsQ kC
 
 multiheadActivation :: forall s.  Int -> Int -> Int -> Int -> KeyCache -> ValueCache -> [Vector Float] -> SAttentionKV s -> ReaderT NetworkConfig (StateT AttentionKV (STT s IO)) (Matrix Float)
-multiheadActivation indexToken numHeads headDim indexLayer kC vC headsQ sakv = do
+multiheadActivation indexToken numHeads headDim indexLayer kC' vC' headsQ sakv = do
 
   network <- ask
 
   let
-
+    numHeadComponents = headDimension network
     sKC = sKeyCache sakv :: AST.STUArray s (Int, Int, Int, Int) Float
     sVC = sValueCache sakv :: AST.STUArray s (Int, Int, Int, Int) Float
   
@@ -190,27 +189,44 @@ multiheadActivation indexToken numHeads headDim indexLayer kC vC headsQ sakv = d
  -}
 
   let
-    kVectors' :: Int -> Int -> Int -> ST s (Vector Float)
-    kVectors' maxIndexToken ixLayer ixHead = V.generateM (maxIndexToken + 1) (\ixToken -> do
-        value <- readArray sKC (ixToken, ixLayer, ixHead, 0)  -- Adjust the index as needed
-        return value
-      )
+    kVectors' :: Int -> STT s IO [Vector Float]
+    kVectors' ixHead = mapM (\ixToken -> do
+        values <- V.generateM numHeadComponents (\ixComponent -> readArray sKC (ixToken, indexLayer, ixHead, ixComponent))
+        return values
+      ) [0..indexToken]
 
-  return [buildActivation headDim (scores indexHead) (vVectors indexHead) | indexHead <- [0 .. numHeads - 1]]
-    where
-      vVectors :: Int -> [Vector Float]
-      vVectors indexHead = map (\ixToken -> vC !! ixToken !! indexLayer !! indexHead) [0..]
+    vVectors' :: Int -> STT s IO [Vector Float]
+    vVectors' ixHead = mapM (\ixToken -> do
+        values <- V.generateM numHeadComponents (\ixComponent -> readArray sVC (ixToken, indexLayer, ixHead, ixComponent))
+        return values
+      ) [0..indexToken]
 
-      kVectors :: Int -> [Vector Float]
-      kVectors indexHead = map (\ixToken -> kC !! ixToken !! indexLayer !! indexHead) [0..]
+    calculateScore :: Int -> Vector Float -> Float
+    calculateScore indexHead keyVector = dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDim)
 
-      calculateScore :: Int -> Vector Float -> Float
-      calculateScore indexHead keyVector = dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDim)
 
-      scores :: Int -> [Float]
-      scores indexHead = V.toList $ softmax rawScores (indexToken + 1)
-        where
-          rawScores = V.generate (indexToken + 1) (\ixToken -> calculateScore indexHead (kVectors indexHead !! ixToken))
+  activations <- mapM (\indexHead -> do
+      k <- lift . lift $ kVectors' indexHead
+      v <- lift . lift $ vVectors' indexHead
+      let
+        scores :: Int -> [Float]
+        scores ixHead = V.toList $ softmax rawScores (indexToken + 1)
+          where
+            rawScores = V.generate (indexToken + 1) (\ixToken -> calculateScore ixHead (k !! ixToken))
+
+        activation = buildActivation headDim (scores indexHead) v
+      return activation
+    ) [0 .. numHeads - 1]
+  
+  return activations
+    --where
+      --vVectors :: Int -> [Vector Float]
+      --vVectors indexHead = map (\ixToken -> vC !! ixToken !! indexLayer !! indexHead) [0..indexToken]
+      --vVectors indexHead = [ vC !! ixToken !! indexLayer !! indexHead | ixToken <- [0..indexToken] ]
+
+      --kVectors :: Int -> [Vector Float]
+      --kVectors indexHead = map (\ixToken -> kC !! ixToken !! indexLayer !! indexHead) [0..indexToken]
+      --kVectors indexHead = [ kC !! ixToken !! indexLayer !! indexHead | ixToken <- [0..indexToken] ]
 
 createTokenVectorForLayer :: forall s. Int -> Int -> Vector Float -> Vector Float -> TokenVector -> SAttentionKV s -> ReaderT NetworkConfig (StateT AttentionKV (STT s IO)) TokenVector
 createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow token sakv = do
