@@ -4,7 +4,7 @@
 
 module NetworkBuilder (
   NetworkConfig(..),
-  AttentionKV(..), SAttentionKV(..),
+  AttentionKV(..),
   Matrix,
   TransformerWeighting(..),
   KeyCache,
@@ -27,7 +27,6 @@ import Data.Maybe (fromMaybe)
 import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
 import Data.Array.ST (STUArray)
-import GHC.Base (Any)
 
 type Matrix a = [Vector a]
 type KeyCache = [[[Vector Float]]]
@@ -38,13 +37,8 @@ type Token = Int32
 type PromptTokens = [Token]
 type TokenVector = Vector Float
 
-data AttentionKV = AttentionKV
-    { keyCache :: KeyCache
-    , valueCache :: ValueCache
-    }
-
 -- indices: (token index, layer index, head index, head component)
-data SAttentionKV s = SAttentionKV
+data AttentionKV s = SAttentionKV
     { sKeyCache :: STUArray s (Int, Int, Int, Int) Float
     , sValueCache :: STUArray s (Int, Int, Int, Int) Float
     }
