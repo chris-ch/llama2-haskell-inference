@@ -88,7 +88,7 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         valueNext = headVector V.! (headItemIndex + 1)
 
 matrixVectorMult :: Matrix Float -> Vector Float -> Vector Float
-matrixVectorMult mat vec = V.fromList $ map (`dotProduct` vec) mat
+matrixVectorMult mat vec = V.fromList $ map (\ vec1 -> V.sum $ V.zipWith (*) vec1 vec) mat
 
 splitVector :: Int -> Vector Float -> [Vector Float]
 splitVector m vec = V.fromList <$> DLS.chunksOf (V.length vec `div` m) (V.toList vec)
