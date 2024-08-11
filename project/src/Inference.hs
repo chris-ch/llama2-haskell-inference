@@ -177,7 +177,7 @@ transformer tokenCode stepCount = do
     -- Forwarding all the layers
     finalToken <- foldM (\accToken indexLayer -> createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow accToken)
                   token
-                  [0..nLayers network - 1]
+                  [0..numLayers network - 1]
 
     -- Final rmsnorm
     let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network)
@@ -234,11 +234,14 @@ run modelFileHandle tokenizerFileHandle temperature steps prompt seed = do
     (promptTokens, vocab) = tokenizerInit tokenizerFileContent (vocabSize config) (BSC.pack prompt')
     initStateAttentionKV :: AttentionKV
     initStateAttentionKV = AttentionKV { keyCache = [], valueCache = [] }
-  printf "network: # layers %d\n" (nLayers config)
-  printf "network: # attention heads %d / head dimension %d\n" (numAttentionHeads config) (headDimension config)
-  printf "network: vocabulary size %d\n" (vocabSize config)
+
+  printf "network: # layers %d\n" (numLayers config)
+  printf "network: # attention heads %d / head dimension %d / kv heads %d\n" (numAttentionHeads config) (headDimension config) (numKeyValueHeads config)
+  printf "network: vocabulary size %d\n" $ vocabSize config
+  printf "network: token dimensions %d\n" $ tokenDim config
   printf "prompt tokens: %s\n" $ show promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
+
   putStrLn "<s>"
   startTime <- getPOSIXTime
   (_, countTokens) <- evalStateT (runReaderT (generateTokens steps promptTokens temperature vocab seedValue) config) initStateAttentionKV

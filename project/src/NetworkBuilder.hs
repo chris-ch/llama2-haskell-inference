@@ -56,9 +56,9 @@ data TransformerWeighting = TransformerWeighting
     } deriving (Show)
 
 data NetworkConfig = NetworkConfig
-    { dim :: Int
+    { tokenDim :: Int
     , hiddenDim :: Int
-    , nLayers :: Int
+    , numLayers :: Int
     , numAttentionHeads :: Int
     , numKeyValueHeads :: Int
     , vocabSize :: Int
@@ -121,9 +121,9 @@ parseNetworkConfigFile = do
               , freqCisImag = freqCisImag'
               }
         return $ NetworkConfig
-            { dim = tokenDim'
+            { tokenDim = tokenDim'
             , hiddenDim = hiddenDim'
-            , nLayers = nLayers'
+            , numLayers = nLayers'
             , numAttentionHeads = numAttentionHeads'
             , numKeyValueHeads = numKeyValueHeads'
             , vocabSize = abs vocabSize'
