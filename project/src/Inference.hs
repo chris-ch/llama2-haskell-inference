@@ -96,9 +96,17 @@ matrixVectorMult' result mat vec = do
     lift $ forM_ (zip [0..] mat) $ \(i, row) -> do
         AST.writeArray result i (V.sum $ V.zipWith (*) row vec)
 
-splitVector :: Int -> Vector Float -> [Vector Float]
-splitVector m vec = V.fromList <$> DLS.chunksOf (V.length vec `div` m) (V.toList vec)
-
+splitVector :: Int -> V.Vector Float -> [V.Vector Float]
+splitVector m vec
+  | m <= 0    = []
+  | otherwise = go 0
+  where
+    len = V.length vec
+    chunkSize = len `div` m
+    go i
+      | i >= len  = []
+      | otherwise = V.slice i (min chunkSize (len - i)) vec : go (i + chunkSize)
+      
 dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ V.zipWith (*) vec1 vec2
 
