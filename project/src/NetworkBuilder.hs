@@ -60,9 +60,9 @@ data TransformerWeighting = TransformerWeighting
     } deriving (Show)
 
 data NetworkConfig = NetworkConfig
-    { dim :: Int
+    { tokenDim :: Int
     , hiddenDim :: Int
-    , nLayers :: Int
+    , numLayers :: Int
     , numAttentionHeads :: Int
     , numKeyValueHeads :: Int
     , vocabSize :: Int
@@ -84,29 +84,29 @@ readMatrices ndepth nrows ncols = replicateM ndepth (readVectors nrows ncols)
 
 parseNetworkConfigFile :: BG.Get NetworkConfig
 parseNetworkConfigFile = do
-        dim' <- fromIntegral <$> getInt32le
+        tokenDim' <- fromIntegral <$> getInt32le
         hiddenDim' <- fromIntegral <$> getInt32le
         nLayers' <- fromIntegral <$> getInt32le
         numAttentionHeads' <- fromIntegral <$> getInt32le
         numKeyValueHeads' <- fromIntegral <$> getInt32le
         vocabSize' <- fromIntegral <$> getInt32le
         seqLen' <- fromIntegral <$> getInt32le
-        tokenEmbeddingTable' <- readVectors vocabSize' dim'
-        rmsAttWeight' <- readVectors nLayers' dim'
+        tokenEmbeddingTable' <- readVectors vocabSize' tokenDim'
+        rmsAttWeight' <- readVectors nLayers' tokenDim'
         
-        let headSize = dim' `div`numAttentionHeads'
+        let headSize = tokenDim' `div` numAttentionHeads'
 
-        wq' <- readMatrices nLayers' (numAttentionHeads' * headSize) dim'
-        wk' <- readMatrices nLayers' (numKeyValueHeads' * headSize) dim'
-        wv' <- readMatrices nLayers' (numKeyValueHeads' * headSize) dim'
-        wo' <- readMatrices nLayers' dim' (numAttentionHeads' * headSize)
-        rmsFfnWeight' <- readVectors nLayers' dim'
-        w1' <- readMatrices nLayers' hiddenDim' dim'
-        w2' <- readMatrices nLayers' dim' hiddenDim'
-        w3' <- readMatrices nLayers' hiddenDim' dim'
-        rmsFinalWeight' <- readVector dim'
-        freqCisReal' <- readVectors seqLen' ((dim' `div` (numAttentionHeads')) `div` 2)
-        freqCisImag' <- readVectors seqLen' ((dim' `div` (numAttentionHeads')) `div` 2)
+        wq' <- readMatrices nLayers' (numAttentionHeads' * headSize) tokenDim'
+        wk' <- readMatrices nLayers' (numKeyValueHeads' * headSize) tokenDim'
+        wv' <- readMatrices nLayers' (numKeyValueHeads' * headSize) tokenDim'
+        wo' <- readMatrices nLayers' tokenDim' (numAttentionHeads' * headSize)
+        rmsFfnWeight' <- readVectors nLayers' tokenDim'
+        w1' <- readMatrices nLayers' hiddenDim' tokenDim'
+        w2' <- readMatrices nLayers' tokenDim' hiddenDim'
+        w3' <- readMatrices nLayers' hiddenDim' tokenDim'
+        rmsFinalWeight' <- readVector tokenDim'
+        freqCisReal' <- readVectors seqLen' ((tokenDim' `div` (numAttentionHeads')) `div` 2)
+        freqCisImag' <- readVectors seqLen' ((tokenDim' `div` (numAttentionHeads')) `div` 2)
 
         let
             weights = TransformerWeighting
@@ -125,9 +125,9 @@ parseNetworkConfigFile = do
               , freqCisImag = freqCisImag'
               }
         return $ NetworkConfig
-            { dim = dim'
+            { tokenDim = tokenDim'
             , hiddenDim = hiddenDim'
-            , nLayers = nLayers'
+            , numLayers = nLayers'
             , numAttentionHeads = numAttentionHeads'
             , numKeyValueHeads = numKeyValueHeads'
             , vocabSize = abs vocabSize'

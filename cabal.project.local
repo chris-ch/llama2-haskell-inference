@@ -1,4 +1,4 @@
 ignore-project: False
-profiling: True
+profiling: False
 profiling-detail: late-toplevel
 optimization: 2

@@ -47,7 +47,7 @@ Running tests matching specifically "FFN":
 HSPEC_COLOR=yes cabal test --test-show-details="streaming" --keep-going --test-option=--match --test-option="FFN"
 ```
 
-### Profiling
+### Profiling
 
 1. Activate profiling in `cabal.project.local`:
 
