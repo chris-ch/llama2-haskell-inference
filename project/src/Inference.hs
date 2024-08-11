@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE BangPatterns #-}
 
 module Inference (run, computeQKV, rmsNorm, splitVector,
 computeDeltaFFN, createLayerToken, multiheadActivation,
