@@ -80,10 +80,10 @@ buildRandomNetworkConfig nSteps numLayers nVocab headDim hiddenDimension = do
     finalWeights <- generateRandomVector dimension
     freqCisReal' <- generateRandomVectors nSteps (headDim `div` 2)
     freqCisImag' <- generateRandomVectors nSteps (headDim `div` 2)
-    return NetworkConfig { dim = dimension,
+    return NetworkConfig { tokenDim = dimension,
         headDimension = headDim,
         hiddenDim = hiddenDimension,
-        nLayers = numLayers,
+        numLayers = numLayers,
         numAttentionHeads = numLayers,
         numKeyValueHeads = numLayers,
         vocabSize = nVocab,
