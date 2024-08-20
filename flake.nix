@@ -2,7 +2,7 @@
   description = "LLaMa2 in Haskell";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/63dacb46bf939521bdc93981b4cbb7ecb58427a0";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -11,19 +11,6 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [
-            (final: prev: {
-              haskell = prev.haskell // {
-                packages = prev.haskell.packages // {
-                  ghc948 = prev.haskell.packages.ghc948.override {
-                    overrides = self: super: {
-                      # You can add package overrides here if needed
-                    };
-                  };
-                };
-              };
-            })
-          ];
         };
 
         haskellPackages = pkgs.haskell.packages.ghc948;
@@ -39,8 +26,12 @@
             ghc
             cabal-install
             haskell-language-server
-            # Add any other development tools you need
+            # Add other packages you need in your development environment
           ];
+          shellHook = ''
+            echo "GHC version: $(ghc --version)"
+            echo "Cabal version: $(cabal --version)"
+          '';
         };
       }
     );
