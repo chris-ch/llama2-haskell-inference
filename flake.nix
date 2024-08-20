@@ -2,7 +2,7 @@
   description = "LLaMa2 in Haskell";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/63dacb46bf939521bdc93981b4cbb7ecb58427a0";
+    nixpkgs.url = "github:NixOS//nixpkgs/24.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -22,10 +22,11 @@
         defaultPackage = self.packages.${system}.${packageName};
 
         devShell = pkgs.mkShell {
-          buildInputs = with haskellPackages; [
-            ghc
-            cabal-install
-            haskell-language-server
+          buildInputs =  with pkgs; [
+            haskellPackages.ghc
+            haskellPackages.cabal-install
+            haskellPackages.haskell-language-server
+            zlib.dev
             # Add other packages you need in your development environment
           ];
           shellHook = ''
