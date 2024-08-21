@@ -104,7 +104,7 @@ splitVector m vec
     go i
       | i >= len  = []
       | otherwise = V.slice i (min chunkSize (len - i)) vec : go (i + chunkSize)
-      
+
 dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ V.zipWith (*) vec1 vec2
 
