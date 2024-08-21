@@ -17,12 +17,12 @@ module NetworkBuilder (
   ) where
 
 import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString as SBS
 import qualified Data.Binary.Get as BG
 import qualified Data.List as DL
 import qualified Data.Vector.Unboxed as V
 
 import Control.Monad (replicateM)
-import Data.Binary.Get (getInt32le, getFloatle)
 import Data.Maybe (fromMaybe)
 import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
@@ -71,10 +71,20 @@ data NetworkConfig = NetworkConfig
     , weighting :: TransformerWeighting
     } deriving (Show)
 
+readBytes :: Int -> BG.Get BS.ByteString
+readBytes count = do
+  values <- BG.getByteString count
+  return $ SBS.fromStrict values
+
 readVector :: Int -> BG.Get (Vector Float)
 readVector count = do
-    values <- replicateM count getFloatle
-    return $ V.fromList values
+    let bytesPerFloat = 4 :: Int
+        totalBytes = count * bytesPerFloat
+    bytes <- readBytes totalBytes
+    return $ V.unfoldrExactN count (getFloat . BS.splitAt (fromIntegral bytesPerFloat)) bytes
+  where
+    getFloat :: (BS.ByteString, BS.ByteString) -> (Float, BS.ByteString)
+    getFloat (chunk, rest) = (BG.runGet BG.getFloatle chunk, rest)
 
 readVectors :: Int -> Int -> BG.Get [Vector Float]
 readVectors nrows ncols = replicateM nrows (readVector ncols)
@@ -84,13 +94,13 @@ readMatrices ndepth nrows ncols = replicateM ndepth (readVectors nrows ncols)
 
 parseNetworkConfigFile :: BG.Get NetworkConfig
 parseNetworkConfigFile = do
-        tokenDim' <- fromIntegral <$> getInt32le
-        hiddenDim' <- fromIntegral <$> getInt32le
-        nLayers' <- fromIntegral <$> getInt32le
-        numAttentionHeads' <- fromIntegral <$> getInt32le
-        numKeyValueHeads' <- fromIntegral <$> getInt32le
-        vocabSize' <- fromIntegral <$> getInt32le
-        seqLen' <- fromIntegral <$> getInt32le
+        tokenDim' <- fromIntegral <$> BG.getInt32le
+        hiddenDim' <- fromIntegral <$> BG.getInt32le
+        nLayers' <- fromIntegral <$> BG.getInt32le
+        numAttentionHeads' <- fromIntegral <$> BG.getInt32le
+        numKeyValueHeads' <- fromIntegral <$> BG.getInt32le
+        vocabSize' <- fromIntegral <$> BG.getInt32le
+        seqLen' <- fromIntegral <$> BG.getInt32le
         tokenEmbeddingTable' <- readVectors vocabSize' tokenDim'
         rmsAttWeight' <- readVectors nLayers' tokenDim'
         

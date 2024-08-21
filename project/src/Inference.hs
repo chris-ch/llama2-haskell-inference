@@ -343,6 +343,7 @@ run modelFileHandle tokenizerFileHandle temperature maxTokens prompt seed = do
   printf "network: token dimensions %d\n" $ tokenDim config
   printf "prompt tokens: %s\n" $ show promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
+
   putStrLn "<s>"
   startTime <- getPOSIXTime
 
