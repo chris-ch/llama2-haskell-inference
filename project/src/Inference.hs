@@ -271,14 +271,12 @@ generateNextToken :: forall s. LogitsVector s -> Int -> Token -> Float -> Int ->
 generateNextToken logits indexToken currentToken temperature seedValue sakv = do
   network <- ask
   transformer logits indexToken currentToken sakv
+  logits' <- lift $ AST.getElems logits
   nextToken <- case temperature of
-    0.0 -> do
-        logits' <- lift $ AST.getElems logits
-        return $ fromIntegral (V.maxIndex (V.fromList logits'))
+    0.0 -> return $ fromIntegral (V.maxIndex (V.fromList logits'))
     _ -> do
         softmax' logits temperature (vocabSize network)
-        elems <- lift $ AST.getElems logits
-        liftIO $ drawSample seedValue $ V.fromList elems
+        liftIO $ drawSample seedValue $ V.fromList logits'
   return nextToken
 
 lookupNextToken :: Vocabulary -> Token -> Token -> BSC.ByteString
