@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Redundant return" #-}
 
-module Inference (run, computeQKV, rmsNorm, splitVector,
+module Inference (run, computeQKV, rmsNorm,
 computeDeltaFFN, createTokenVectorForLayer, multiheadActivation,
 buildActivation, applyRotations, transformer,
 softmax, drawSample
@@ -93,17 +93,6 @@ matrixVectorMult' result mat vec = do
     lift $ forM_ (zip [0..] (M.getRowVectors mat)) $ \(i, row) -> do
         AST.writeArray result i (V.sum $ V.zipWith (*) row vec)
 
-splitVector :: Int -> V.Vector Float -> [V.Vector Float]
-splitVector m vec
-  | m <= 0    = []
-  | otherwise = go 0
-  where
-    len = V.length vec
-    chunkSize = len `div` m
-    go i
-      | i >= len  = []
-      | otherwise = V.slice i (min chunkSize (len - i)) vec : go (i + chunkSize)
-
 dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ V.zipWith (*) vec1 vec2
 
@@ -137,32 +126,25 @@ computeDeltaFFN weights indexLayer token =
     in
       M.multiplyVector weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
 
-splitEvery :: V.Unbox a => Int -> V.Vector a -> [V.Vector a]
-splitEvery n vec
-    | V.null vec = []
-    | otherwise = chunk : splitEvery n rest
-  where
-    (chunk, rest) = V.splitAt n vec
-
 computeQKV :: TransformerWeighting -> Int -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> (M.Matrix Float, M.Matrix Float, M.Matrix Float)
 computeQKV weights numHeads dimHead indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token (rmsAttWeight weights !! indexLayer)
-    wQ = M.multiplyVector (wq weights !! indexLayer) rba
-    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wQ)
-    wK = M.multiplyVector (wk weights !! indexLayer) rba
-    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wK)
+    wQ = M.Matrix numHeads dimHead $ M.multiplyVector (wq weights !! indexLayer) rba
+    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (M.getRowVectors wQ)
+    wK = M.Matrix numHeads dimHead $ M.multiplyVector (wk weights !! indexLayer) rba
+    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (M.getRowVectors wK)
     headsV = M.Matrix numHeads dimHead $ M.multiplyVector (wv weights !! indexLayer) rba
   in
     (M.fromVectors numHeads dimHead headsQ, M.fromVectors numHeads dimHead headsK, headsV)
 
-multiheadActivation :: forall s.  Int -> Int -> Int -> Int -> M.Matrix Float -> AttentionKV s -> TransformerStack s (M.Matrix Float)
-multiheadActivation indexToken numHeads headDim indexLayer headsQ sakv = do
-
+multiheadActivation :: forall s.  Int -> Int -> M.Matrix Float -> AttentionKV s -> TransformerStack s (M.Matrix Float)
+multiheadActivation indexToken indexLayer headsQ sakv = do
   network <- ask
-
   let
     numHeadComponents = headDimension network
+    numHeads = numAttentionHeads network
+    headDim = headDimension network
     sKC = sKeyCache sakv :: AST.STUArray s (Int, Int, Int, Int) Float
     sVC = sValueCache sakv :: AST.STUArray s (Int, Int, Int, Int) Float
 
@@ -219,7 +201,7 @@ createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow to
         forM_ [0..V.length headV - 1] $ \j -> do
             lift $ AST.writeArray sVC (indexToken, indexLayer, i, j) (headV V.! j)
 
-    activations' <- multiheadActivation indexToken (numAttentionHeads network) (headDimension network) indexLayer headsQ sakv
+    activations' <- multiheadActivation indexToken indexLayer headsQ sakv
 
     let
       wO = wo (weighting network)
