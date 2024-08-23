@@ -65,3 +65,19 @@ Running tests matching specifically "FFN":
 ```shell
 HSPEC_COLOR=yes cabal test --test-show-details="streaming" --keep-going --test-option=--match --test-option="FFN"
 ```
+
+### Profiling
+
+1. Activate profiling in `cabal.project.local`:
+
+```text
+profiling: True
+```
+
+2. Add profiling options at the end of the command line:
+
+```shell
+cabal run -- llama2 --seed 1 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town" +RTS -pj
+```
+
+3. Visualize with https://www.speedscope.app/

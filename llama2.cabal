@@ -71,7 +71,10 @@ executable llama2
   hs-source-dirs:
       project/cli-app
   build-depends: optparse-applicative,
-      llama2
+    llama2
+  ghc-options:
+    -Wall
+    --rtsopts
 
 test-suite project-test
   import: shared

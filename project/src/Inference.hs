@@ -13,7 +13,6 @@ softmax, drawSample
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString.Lazy.Char8 as BSC
 import qualified Data.List as DL
-import qualified Data.List.Split as DLS
 import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
 
@@ -41,7 +40,7 @@ import qualified Matrix as M
 
 type TransformerStack s a = ReaderT NetworkConfig (STT s IO) a
 
-type LogitsVector = Vector Float
+type LogitsVector s = AST.STArray s Int Float
 
 softmax :: Vector Float -> Int -> Vector Float
 softmax values size = V.concat [softmaxValues, V.slice size (V.length values - size) values]
@@ -89,8 +88,21 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         value = headVector V.! headItemIndex
         valueNext = headVector V.! (headItemIndex + 1)
 
-splitVector :: Int -> Vector Float -> [Vector Float]
-splitVector m vec = V.fromList <$> DLS.chunksOf (V.length vec `div` m) (V.toList vec)
+matrixVectorMult' :: LogitsVector s -> M.Matrix Float -> Vector Float -> TransformerStack s ()
+matrixVectorMult' result mat vec = do
+    lift $ forM_ (zip [0..] (M.getRowVectors mat)) $ \(i, row) -> do
+        AST.writeArray result i (V.sum $ V.zipWith (*) row vec)
+
+splitVector :: Int -> V.Vector Float -> [V.Vector Float]
+splitVector m vec
+  | m <= 0    = []
+  | otherwise = go 0
+  where
+    len = V.length vec
+    chunkSize = len `div` m
+    go i
+      | i >= len  = []
+      | otherwise = V.slice i (min chunkSize (len - i)) vec : go (i + chunkSize)
 
 dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ V.zipWith (*) vec1 vec2
@@ -146,7 +158,7 @@ multiheadActivation indexToken numHeads headDim indexLayer headsQ sakv = do
     numHeadComponents = headDimension network
     sKC = sKeyCache sakv :: AST.STUArray s (Int, Int, Int, Int) Float
     sVC = sValueCache sakv :: AST.STUArray s (Int, Int, Int, Int) Float
-  
+
   let
     kVectors' :: Int -> STT s IO [Vector Float]
     kVectors' ixHead = mapM (\ixToken -> do
@@ -164,8 +176,8 @@ multiheadActivation indexToken numHeads headDim indexLayer headsQ sakv = do
     calculateScore indexHead keyVector = dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDim)
 
   activations <- mapM (\indexHead -> do
-      k <- lift $ kVectors' indexHead
-      v <- lift $ vVectors' indexHead
+      (k :: [Vector Float]) <- lift $ kVectors' indexHead
+      (v :: [Vector Float]) <- lift $ vVectors' indexHead
       let
         scores :: Int -> [Float]
         scores ixHead = V.toList $ softmax rawScores (indexToken + 1)
@@ -211,8 +223,8 @@ createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow to
 
     return result
 
-transformer :: Int -> Token -> AttentionKV s -> TransformerStack s LogitsVector
-transformer indexToken tokenCode sakv = do
+transformer :: forall s. LogitsVector s -> Int -> Token -> AttentionKV s -> TransformerStack s ()
+transformer logits indexToken tokenCode sakv = do
     network <- ask
 
     -- Getting the token embedding
@@ -231,32 +243,55 @@ transformer indexToken tokenCode sakv = do
     let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network) :: TokenVector
 
     -- Classifier into logits
-    let logits = M.multiplyVector (tokenEmbeddingTable (weighting network)) tokenWithRms :: LogitsVector
+    matrixVectorMult' logits (tokenEmbeddingTable (weighting network)) tokenWithRms
 
-    return logits
+softmax' :: forall s. LogitsVector s -> Float -> Int -> TransformerStack s ()
+softmax' values temperature size = do
+    -- Find the maximum value in the relevant portion of the array
+    maxVal <- lift $ do
+        foldM (\acc i -> max acc <$> readArray values i) (negate (1/0)) [0..size - 1]
 
-generateNextToken :: Int -> PromptTokens -> Float -> Vocabulary -> Token -> Int -> AttentionKV s -> TransformerStack s (BS.ByteString, Token)
-generateNextToken indexToken promptTokens temperature vocab tokenCode seedValue sakv = do
+    -- Compute exponentials and store them in place
+    sumExpValues <- lift $ do
+        foldM (\acc i -> do
+            x <- readArray values i
+            let expVal = exp ((x - maxVal) / temperature)
+            AST.writeArray values i expVal
+            return (acc + expVal)
+          ) 0 [0..size - 1]
+
+    -- Normalize the values
+    lift $ do
+        forM_ [0..size - 1] $ \i -> do
+            expVal <- readArray values i
+            AST.writeArray values i (expVal / sumExpValues)
+
+generateNextToken :: forall s. LogitsVector s -> Int -> Token -> Float -> Int -> AttentionKV s -> TransformerStack s Token
+generateNextToken logits indexToken tokenCode temperature seedValue sakv = do
   network <- ask
-  logits <- transformer indexToken tokenCode sakv
-  nextToken <- if indexToken < length promptTokens
-    then return (promptTokens !! indexToken)
-    else if temperature == 0.0
-      then return $ fromIntegral (V.maxIndex logits)
-    else do
-      liftIO $ drawSample seedValue $ softmax (V.map (/ temperature) logits) (vocabSize network)
-  let
-    word = vocab !! fromIntegral nextToken :: BS.ByteString
-    firstChar = BSC.head word :: Char
-    tokenStr = if tokenCode == 1 && isSpace firstChar
-          then BSC.tail (vocab !! fromIntegral nextToken)
-          else vocab !! fromIntegral nextToken
-  return (tokenStr, nextToken)
+  transformer logits indexToken tokenCode sakv
+  nextToken <- case temperature of
+    0.0 -> do
+      logits' <- lift $ AST.getElems logits
+      return $ fromIntegral (V.maxIndex (V.fromList logits'))
+    _ -> do
+        softmax' logits temperature (vocabSize network)
+        logits' <- lift $ AST.getElems logits
+        liftIO $ drawSample seedValue $ V.fromList logits'
+  return nextToken
 
-generateTokens :: Int -> PromptTokens -> Float -> Vocabulary -> Int -> TransformerStack s ([BSC.ByteString], Int)
+lookupNextToken :: Vocabulary -> Token -> Token -> BSC.ByteString
+lookupNextToken vocab prevToken token = tokenStr
+  where
+    word = vocab !! fromIntegral token :: BS.ByteString
+    firstChar = BSC.head word :: Char
+    tokenStr = if prevToken == 1 && isSpace firstChar
+          then BSC.tail (vocab !! fromIntegral token)
+          else vocab !! fromIntegral token
+
+generateTokens :: forall s. Int -> PromptTokens -> Float -> Vocabulary -> Int -> TransformerStack s ([BSC.ByteString], Int)
 generateTokens maxTokens promptTokens temperature vocab seedValue = do
   network <- ask
-
   let
     numHeads = numAttentionHeads network
     numHeadComponents = headDimension network
@@ -266,16 +301,25 @@ generateTokens maxTokens promptTokens temperature vocab seedValue = do
 
   let sakv = SAttentionKV { sKeyCache = sKC, sValueCache = sVC }
 
-  go network 0 [] 1 sakv
+  mutableLogits <- lift $ AST.newArray (0 :: Int, vocabSize network - 1) (0.0 :: Float)
+  go network mutableLogits 0 [] 1 sakv
     where
-      go :: NetworkConfig -> Int -> [BSC.ByteString] -> Token -> AttentionKV s -> TransformerStack s ([BSC.ByteString], Int)
-      go network indexToken result token sakv
+      go :: NetworkConfig -> LogitsVector s -> Int -> [BSC.ByteString] -> Token -> AttentionKV s -> TransformerStack s ([BSC.ByteString], Int)
+      go network logits indexToken result token sakv
         | indexToken >= maxTokens || (indexToken /= 0 && token == 1) = return (result, indexToken)
-        | otherwise = do
-          (tokenStr, nextToken) <- generateNextToken indexToken promptTokens temperature vocab token seedValue sakv
-          liftIO $ printf "%s" (BSC.unpack tokenStr)
+        | indexToken < length promptTokens = do
+          transformer logits indexToken token sakv
+          let nextToken = promptTokens !! indexToken
+          let nextTokenStr = lookupNextToken vocab token nextToken
+          liftIO $ printf "%s" (BSC.unpack nextTokenStr)
           liftIO $ hFlush stdout
-          go network (indexToken + 1) (result ++ [tokenStr]) nextToken sakv
+          go network logits (indexToken + 1) (result ++ [nextTokenStr]) nextToken sakv
+        | otherwise = do
+          nextToken <- generateNextToken logits indexToken token temperature seedValue sakv
+          let nextTokenStr = lookupNextToken vocab token nextToken
+          liftIO $ printf "%s" (BSC.unpack nextTokenStr)
+          liftIO $ hFlush stdout
+          go network logits (indexToken + 1) (result ++ [nextTokenStr]) nextToken sakv
 
 run :: Handle -> Handle -> Float -> Int -> Maybe String -> Maybe Int -> IO ()
 run modelFileHandle tokenizerFileHandle temperature maxTokens prompt seed = do
