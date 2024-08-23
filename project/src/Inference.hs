@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Inference (run, computeQKV, rmsNorm, splitVector,
+module Inference (run, computeQKV, rmsNorm, splitEvery,
 computeDeltaFFN, createLayerToken, multiheadActivation,
 buildActivation, applyRotations, transformer,
 softmax, drawSample
@@ -9,7 +9,6 @@ softmax, drawSample
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.ByteString.Lazy.Char8 as BSC
 import qualified Data.List as DL
-import qualified Data.List.Split as DLS
 import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
 import qualified Matrix as M
@@ -57,14 +56,14 @@ drawSample seedValue probabilities = do
   return $ fromIntegral $ indexHighestCDF r probabilities
 
 -- Returns an array of size (headDim)
-buildActivation :: Int -> Int -> ValueCache -> Int -> [Float] -> Vector Float
+buildActivation :: Int -> Int -> ValueCache -> Int -> Vector Float -> Vector Float
 buildActivation headDim indexLayer vC indexHead headScores =
   DL.foldl' accumulate zeroVector zippedValues
   where
     accumulate :: Vector Float -> (Vector Float, Float) -> Vector Float
     accumulate acc (valueVector, attentionWeight) = V.zipWith (+) acc (scale attentionWeight valueVector)
     zeroVector = V.replicate headDim 0.0
-    zippedValues = zip (map (\count -> M.getRowVector (vC !! count !! indexLayer) indexHead) [0..]) headScores
+    zippedValues = zip (map (\countToken -> M.getRowVector (vC !! countToken !! indexLayer) indexHead) [0..]) (V.toList headScores)
     scale w = V.map (w *)
 
 applyRotations :: Vector Float -> Vector Float -> Vector Float -> Vector Float
@@ -79,8 +78,12 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         value = headVector V.! headItemIndex
         valueNext = headVector V.! (headItemIndex + 1)
 
-splitVector :: Int -> Vector Float -> [Vector Float]
-splitVector m vec = V.fromList <$> DLS.chunksOf (V.length vec `div` m) (V.toList vec)
+splitEvery :: V.Unbox a => Int -> V.Vector a -> [V.Vector a]
+splitEvery n vec
+    | V.null vec = []
+    | otherwise = chunk : splitEvery n rest
+  where
+    (chunk, rest) = V.splitAt n vec
 
 dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ V.zipWith (*) vec1 vec2
@@ -114,31 +117,32 @@ computeDeltaFFN weights indexLayer token =
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
     in M.multiplyVector weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
 
-computeQKV :: TransformerWeighting -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
-computeQKV weights numHeads indexLayer freqCisRealRow freqCisImagRow token =
+computeQKV :: TransformerWeighting -> Int -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> (M.Matrix Float, M.Matrix Float, M.Matrix Float)
+computeQKV weights numHeads dimHead indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token (rmsAttWeight weights !! indexLayer)
-    wQ = splitVector numHeads (M.multiplyVector (wq weights !! indexLayer) rba)
-    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wQ
-    wK = splitVector numHeads (M.multiplyVector (wk weights !! indexLayer) rba)
-    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
-    headsV = splitVector numHeads (M.multiplyVector (wv weights !! indexLayer) rba)
+    wQ = M.multiplyVector (wq weights !! indexLayer) rba
+    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wQ)
+    wK = M.multiplyVector (wk weights !! indexLayer) rba
+    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wK)
+    headsV = M.multiplyVector (wv weights !! indexLayer) rba
   in
-    (headsQ, headsK, headsV)
+    (M.fromVectors numHeads dimHead headsQ, M.fromVectors numHeads dimHead headsK, M.fromVector numHeads dimHead headsV)
 
-computeScores :: Int -> KeyCache -> Int -> Int -> [Vector Float] -> Vector Float
+computeScores :: Int -> KeyCache -> Int -> Int -> M.Matrix Float -> Vector Float
 computeScores headDim kC indexLayer indexHead headsQ = V.fromList $ map calculateScore kC
   where
     calculateScore :: [M.Matrix Float] -> Float
     calculateScore keyVectors =
       let keyVector = M.getRowVector (keyVectors !! indexLayer) indexHead
-      in dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDim)
+      in dotProduct (M.getRowVector headsQ indexHead) keyVector / sqrt (fromIntegral headDim)
 
-multiheadActivation :: Int -> Int -> Int -> KeyCache -> ValueCache -> [Vector Float] -> M.Matrix Float
+multiheadActivation :: Int -> Int -> Int -> KeyCache -> ValueCache -> M.Matrix Float -> M.Matrix Float
 multiheadActivation numHeads headDim indexLayer kC vC headsQ =
     M.fromVectors numHeads headDim [activation indexHead | indexHead <- [0 .. numHeads - 1]]
     where
-      activation indexHead = buildActivation headDim indexLayer vC indexHead (V.toList $ scores indexHead)
+      activation :: Int -> Vector Float
+      activation indexHead = buildActivation headDim indexLayer vC indexHead (scores indexHead)
       scores indexHead = softmax rawScores (V.length rawScores)
         where
           rawScores = computeScores headDim kC indexLayer indexHead headsQ
@@ -148,9 +152,9 @@ createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
     network <- ask
     (kC, vC) <- gets (\cache -> (keyCache cache, valueCache cache))
     let
-        (headsQ, headsK, headsV) = computeQKV (weighting network) (numAttentionHeads network) indexLayer freqCisRealRow freqCisImagRow token
-        keyCacheStep = (kC !! stepCount) ++ [M.fromVectors (numAttentionHeads network) (headDimension network) headsK]
-        valueCacheStep = (vC !! stepCount) ++ [M.fromVectors (numAttentionHeads network) (headDimension network) headsV]
+        (headsQ, headsK, headsV) = computeQKV (weighting network) (numAttentionHeads network) (headDimension network) indexLayer freqCisRealRow freqCisImagRow token
+        keyCacheStep = (kC !! stepCount) ++ [headsK]
+        valueCacheStep = (vC !! stepCount) ++ [headsV]
         keyCache' = take stepCount kC ++ [keyCacheStep]
         valueCache' = take stepCount vC ++ [valueCacheStep]
         activations = multiheadActivation (numAttentionHeads network) (headDimension network) indexLayer keyCache' valueCache' headsQ
