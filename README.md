@@ -17,7 +17,26 @@ There is also a bigger version, for better stories:
 wget --directory-prefix=data https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin
 ```
 
+### Using nix
+
+Make sure flakes are enabled: add `experimental-features = nix-command flakes` to `~/.config/nix/nix.conf`
+
+```shell
+nix develop
+code .
+```
+
+Make sure HLS is set in `.vscode/settings.json` in order to get error messages in VSCode:
+
+```json
+{ "haskell.serverExecutablePath": "haskell-language-server" }
+```
+
 ### Running llama2 using cabal
+
+```shell
+cabal update
+```
 
 ```shell
 cabal run -- llama2 --model-file data/stories15M.bin --temperature 0.8 --steps 256 "In that little town"

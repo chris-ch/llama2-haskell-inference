@@ -5,7 +5,6 @@
 module NetworkBuilder (
   NetworkConfig(..),
   AttentionKV(..),
-  Matrix,
   TransformerWeighting(..),
   KeyCache,
   ValueCache,
@@ -17,20 +16,21 @@ module NetworkBuilder (
   ) where
 
 import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString as SBS
 import qualified Data.Binary.Get as BG
 import qualified Data.List as DL
 import qualified Data.Vector.Unboxed as V
 
 import Control.Monad (replicateM)
-import Data.Binary.Get (getInt32le, getFloatle)
 import Data.Maybe (fromMaybe)
 import Data.Int (Int32)
 import Data.Vector.Unboxed (Vector)
 import Data.Array.ST (STUArray)
 
-type Matrix a = [Vector a]
-type KeyCache = [[[Vector Float]]]
-type ValueCache = [[[Vector Float]]]
+import qualified Matrix as M
+
+type KeyCache = [[M.Matrix Float]]
+type ValueCache = [[M.Matrix Float]]
 type Vocabulary = [BS.ByteString]
 type VocabularyScores = [Float]
 type Token = Int32
@@ -44,25 +44,25 @@ data AttentionKV s = SAttentionKV
     }
 
 data TransformerWeighting = TransformerWeighting
-    { tokenEmbeddingTable :: [TokenVector]
-    , rmsAttWeight :: [Vector Float]
-    , wq :: [Matrix Float]
-    , wk :: [Matrix Float]
-    , wv :: [Matrix Float]
-    , wo :: [Matrix Float]
-    , rmsFfnWeight :: [Vector Float]
-    , w1 :: [Matrix Float]
-    , w3 :: [Matrix Float]
-    , w2 :: [Matrix Float]
-    , rmsFinalWeight :: Vector Float
-    , freqCisReal :: [Vector Float]
-    , freqCisImag :: [Vector Float]
+    { tokenEmbeddingTable :: M.Matrix Float
+    , rmsAttWeight :: [V.Vector Float]
+    , wq :: [M.Matrix Float]
+    , wk :: [M.Matrix Float]
+    , wv :: [M.Matrix Float]
+    , wo :: [M.Matrix Float]
+    , rmsFfnWeight :: [V.Vector Float]
+    , w1 :: [M.Matrix Float]
+    , w3 :: [M.Matrix Float]
+    , w2 :: [M.Matrix Float]
+    , rmsFinalWeight :: V.Vector Float
+    , freqCisReal :: [V.Vector Float]
+    , freqCisImag :: [V.Vector Float]
     } deriving (Show)
 
 data NetworkConfig = NetworkConfig
-    { dim :: Int
+    { tokenDim :: Int
     , hiddenDim :: Int
-    , nLayers :: Int
+    , numLayers :: Int
     , numAttentionHeads :: Int
     , numKeyValueHeads :: Int
     , vocabSize :: Int
@@ -71,42 +71,57 @@ data NetworkConfig = NetworkConfig
     , weighting :: TransformerWeighting
     } deriving (Show)
 
-readVector :: Int -> BG.Get (Vector Float)
-readVector count = do
-    values <- replicateM count getFloatle
-    return $ V.fromList values
+readBytes :: Int -> BG.Get BS.ByteString
+readBytes count = do
+  values <- BG.getByteString count
+  return $ SBS.fromStrict values
 
-readVectors :: Int -> Int -> BG.Get [Vector Float]
+readVector :: Int -> BG.Get (V.Vector Float)
+readVector count = do
+    let bytesPerFloat = 4 :: Int
+        totalBytes = count * bytesPerFloat
+    bytes <- readBytes totalBytes
+    return $ V.unfoldrExactN count (getFloat . BS.splitAt (fromIntegral bytesPerFloat)) bytes
+  where
+    getFloat :: (BS.ByteString, BS.ByteString) -> (Float, BS.ByteString)
+    getFloat (chunk, rest) = (BG.runGet BG.getFloatle chunk, rest)
+
+readVectors :: Int -> Int -> BG.Get [V.Vector Float]
 readVectors nrows ncols = replicateM nrows (readVector ncols)
 
-readMatrices :: Int -> Int -> Int -> BG.Get [Matrix Float]
-readMatrices ndepth nrows ncols = replicateM ndepth (readVectors nrows ncols)
+readMatrix :: Int -> Int -> BG.Get (M.Matrix Float)
+readMatrix nrows ncols = do
+  values <- readVector (nrows * ncols)
+  return $ M.Matrix nrows ncols values
+
+readMatrices :: Int -> Int -> Int -> BG.Get [M.Matrix Float]
+readMatrices ndepth nrows ncols = replicateM ndepth (readMatrix nrows ncols)
 
 parseNetworkConfigFile :: BG.Get NetworkConfig
 parseNetworkConfigFile = do
-        dim' <- fromIntegral <$> getInt32le
-        hiddenDim' <- fromIntegral <$> getInt32le
-        nLayers' <- fromIntegral <$> getInt32le
-        numAttentionHeads' <- fromIntegral <$> getInt32le
-        numKeyValueHeads' <- fromIntegral <$> getInt32le
-        vocabSize' <- fromIntegral <$> getInt32le
-        seqLen' <- fromIntegral <$> getInt32le
-        tokenEmbeddingTable' <- readVectors vocabSize' dim'
-        rmsAttWeight' <- readVectors nLayers' dim'
-        
-        let headSize = dim' `div`numAttentionHeads'
+        tokenDim' <- fromIntegral <$> BG.getInt32le
+        hiddenDim' <- fromIntegral <$> BG.getInt32le
+        nLayers' <- fromIntegral <$> BG.getInt32le
+        numAttentionHeads' <- fromIntegral <$> BG.getInt32le
+        numKeyValueHeads' <- fromIntegral <$> BG.getInt32le
+        vocabSize' <- fromIntegral <$> BG.getInt32le
+        seqLen' <- fromIntegral <$> BG.getInt32le
+        tokenEmbeddingTable' <- readMatrix vocabSize' tokenDim'
+        rmsAttWeight' <- readVectors nLayers' tokenDim'
 
-        wq' <- readMatrices nLayers' (numAttentionHeads' * headSize) dim'
-        wk' <- readMatrices nLayers' (numKeyValueHeads' * headSize) dim'
-        wv' <- readMatrices nLayers' (numKeyValueHeads' * headSize) dim'
-        wo' <- readMatrices nLayers' dim' (numAttentionHeads' * headSize)
-        rmsFfnWeight' <- readVectors nLayers' dim'
-        w1' <- readMatrices nLayers' hiddenDim' dim'
-        w2' <- readMatrices nLayers' dim' hiddenDim'
-        w3' <- readMatrices nLayers' hiddenDim' dim'
-        rmsFinalWeight' <- readVector dim'
-        freqCisReal' <- readVectors seqLen' ((dim' `div` (numAttentionHeads')) `div` 2)
-        freqCisImag' <- readVectors seqLen' ((dim' `div` (numAttentionHeads')) `div` 2)
+        let headSize = tokenDim' `div` numAttentionHeads'
+
+        wq' <- readMatrices nLayers' (numAttentionHeads' * headSize) tokenDim'
+        wk' <- readMatrices nLayers' (numKeyValueHeads' * headSize) tokenDim'
+        wv' <- readMatrices nLayers' (numKeyValueHeads' * headSize) tokenDim'
+        wo' <- readMatrices nLayers' tokenDim' (numAttentionHeads' * headSize)
+        rmsFfnWeight' <- readVectors nLayers' tokenDim'
+        w1' <- readMatrices nLayers' hiddenDim' tokenDim'
+        w2' <- readMatrices nLayers' tokenDim' hiddenDim'
+        w3' <- readMatrices nLayers' hiddenDim' tokenDim'
+        rmsFinalWeight' <- readVector tokenDim'
+        freqCisReal' <- readVectors seqLen' ((tokenDim' `div` (numAttentionHeads')) `div` 2)
+        freqCisImag' <- readVectors seqLen' ((tokenDim' `div` (numAttentionHeads')) `div` 2)
 
         let
             weights = TransformerWeighting
@@ -125,9 +140,9 @@ parseNetworkConfigFile = do
               , freqCisImag = freqCisImag'
               }
         return $ NetworkConfig
-            { dim = dim'
+            { tokenDim = tokenDim'
             , hiddenDim = hiddenDim'
-            , nLayers = nLayers'
+            , numLayers = nLayers'
             , numAttentionHeads = numAttentionHeads'
             , numKeyValueHeads = numKeyValueHeads'
             , vocabSize = abs vocabSize'

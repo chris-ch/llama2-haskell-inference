@@ -6,7 +6,7 @@
 
 module Inference (run, computeQKV, rmsNorm, splitVector,
 computeDeltaFFN, createTokenVectorForLayer, multiheadActivation,
-buildActivation, applyRotations, matrixVectorMult, transformer,
+buildActivation, applyRotations, transformer,
 softmax, drawSample
  ) where
 
@@ -18,7 +18,7 @@ import qualified System.Random as R
 import qualified Data.Vector.Unboxed as V
 
 import NetworkBuilder (NetworkConfig(..), AttentionKV(..),
-  Matrix, TransformerWeighting(..), Vocabulary, PromptTokens, Token, TokenVector,
+  TransformerWeighting(..), Vocabulary, PromptTokens, Token, TokenVector,
   initModel, tokenizerInit)
 import qualified Data.Array.ST as AST
 import Control.Monad.Trans (lift)
@@ -36,6 +36,8 @@ import Control.Monad.Reader
 import GHC.IO.Handle (Handle)
 import GHC.Unicode (isSpace)
 import Control.Monad.ST.Trans (STT, runSTT)
+
+import qualified Matrix as M
 
 type TransformerStack s a = ReaderT NetworkConfig (STT s IO) a
 
@@ -87,9 +89,6 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         value = headVector V.! headItemIndex
         valueNext = headVector V.! (headItemIndex + 1)
 
-matrixVectorMult :: Matrix Float -> Vector Float -> Vector Float
-matrixVectorMult mat vec = V.fromList $ map (`dotProduct` vec) mat
-
 splitVector :: Int -> Vector Float -> [Vector Float]
 splitVector m vec = V.fromList <$> DLS.chunksOf (V.length vec `div` m) (V.toList vec)
 
@@ -116,29 +115,29 @@ computeDeltaFFN weights indexLayer token =
       sigmoidLinearUnit value = value / (1.0 + exp (-value))
 
       rmsFFNWeight = rmsFfnWeight weights !! indexLayer :: Vector Float
-      weight1 = w1 weights !! indexLayer :: Matrix Float
-      weight2 = w2 weights !! indexLayer :: Matrix Float
-      weight3 = w3 weights !! indexLayer :: Matrix Float
+      weight1 = w1 weights !! indexLayer :: M.Matrix Float
+      weight2 = w2 weights !! indexLayer :: M.Matrix Float
+      weight3 = w3 weights !! indexLayer :: M.Matrix Float
       rba = rmsNorm token rmsFFNWeight :: Vector Float
-      hiddenDimensionBuffer1 = matrixVectorMult weight1 rba :: Vector Float
-      hiddenDimensionBuffer2 = matrixVectorMult weight3 rba :: Vector Float
+      hiddenDimensionBuffer1 = M.multiplyVector weight1 rba :: Vector Float
+      hiddenDimensionBuffer2 = M.multiplyVector weight3 rba :: Vector Float
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1 :: Vector Float
     in
-      matrixVectorMult weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
+      M.multiplyVector weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
 
 computeQKV :: TransformerWeighting -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
 computeQKV weights numHeads indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token (rmsAttWeight weights !! indexLayer)
-    wQ = splitVector numHeads (matrixVectorMult (wq weights !! indexLayer) rba)
+    wQ = splitVector numHeads (M.multiplyVector (wq weights !! indexLayer) rba)
     headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wQ
-    wK = splitVector numHeads (matrixVectorMult (wk weights !! indexLayer) rba)
+    wK = splitVector numHeads (M.multiplyVector (wk weights !! indexLayer) rba)
     headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
-    headsV = splitVector numHeads (matrixVectorMult (wv weights !! indexLayer) rba)
+    headsV = splitVector numHeads (M.multiplyVector (wv weights !! indexLayer) rba)
   in
     (headsQ, headsK, headsV)
 
-multiheadActivation :: forall s.  Int -> Int -> Int -> Int -> [Vector Float] -> AttentionKV s -> TransformerStack s (Matrix Float)
+multiheadActivation :: forall s.  Int -> Int -> Int -> Int -> [Vector Float] -> AttentionKV s -> TransformerStack s (M.Matrix Float)
 multiheadActivation indexToken numHeads headDim indexLayer headsQ sakv = do
 
   network <- ask
@@ -177,7 +176,7 @@ multiheadActivation indexToken numHeads headDim indexLayer headsQ sakv = do
       return activation
     ) [0 .. numHeads - 1]
   
-  return activations
+  return $ M.fromVectors numHeads headDim activations
 
 createTokenVectorForLayer :: forall s. Int -> Int -> Vector Float -> Vector Float -> TokenVector -> AttentionKV s -> TransformerStack s TokenVector
 createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow token sakv = do
@@ -205,7 +204,7 @@ createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow to
 
     let
       wO = wo (weighting network)
-      deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations')
+      deltaTokenQKV = M.multiplyVector (wO !! indexLayer) (M.values activations')
       token' = V.zipWith (+) token deltaTokenQKV :: TokenVector
       deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token' :: Vector Float
       result = V.zipWith (+) token' deltaTokenFFN :: TokenVector
@@ -217,7 +216,7 @@ transformer indexToken tokenCode sakv = do
     network <- ask
 
     -- Getting the token embedding
-    let token = tokenEmbeddingTable (weighting network) !! fromIntegral tokenCode :: TokenVector
+    let token = M.getRowVector (tokenEmbeddingTable (weighting network)) (fromIntegral tokenCode) :: TokenVector
 
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
     let freqCisRealRow = freqCisReal (weighting network) !! indexToken :: Vector Float
@@ -226,13 +225,13 @@ transformer indexToken tokenCode sakv = do
     -- Forwarding all layers
     finalToken <- foldM (\accToken indexLayer -> createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow accToken sakv)
                   token
-                  [0..nLayers network - 1]
+                  [0..numLayers network - 1]
 
     -- Final rmsnorm
     let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network) :: TokenVector
 
     -- Classifier into logits
-    let logits = matrixVectorMult (tokenEmbeddingTable (weighting network)) tokenWithRms :: LogitsVector
+    let logits = M.multiplyVector (tokenEmbeddingTable (weighting network)) tokenWithRms :: LogitsVector
 
     return logits
 
@@ -259,12 +258,11 @@ generateTokens maxTokens promptTokens temperature vocab seedValue = do
   network <- ask
 
   let
-    numLayers = nLayers network
     numHeads = numAttentionHeads network
     numHeadComponents = headDimension network
 
-  sKC <- lift $ AST.newArray ((0, 0, 0, 0), (maxTokens - 1, numLayers - 1, numHeads - 1, numHeadComponents - 1)) 0.0
-  sVC <- lift $ AST.newArray ((0, 0, 0, 0), (maxTokens - 1, numLayers - 1, numHeads - 1, numHeadComponents - 1)) 0.0
+  sKC <- lift $ AST.newArray ((0, 0, 0, 0), (maxTokens - 1, numLayers network - 1, numHeads - 1, numHeadComponents - 1)) 0.0
+  sVC <- lift $ AST.newArray ((0, 0, 0, 0), (maxTokens - 1, numLayers network - 1, numHeads - 1, numHeadComponents - 1)) 0.0
 
   let sakv = SAttentionKV { sKeyCache = sKC, sValueCache = sVC }
 
@@ -293,10 +291,10 @@ run modelFileHandle tokenizerFileHandle temperature maxTokens prompt seed = do
     prompt' = fromMaybe "" prompt
     (promptTokens, vocab) = tokenizerInit tokenizerFileContent (vocabSize config) (BSC.pack prompt')
 
-  printf "network: # layers %d\n" (nLayers config)
+  printf "network: # layers %d\n" (numLayers config)
   printf "network: # attention heads %d / head dimension %d\n" (numAttentionHeads config) (headDimension config)
   printf "network: vocabulary size %d\n" $ vocabSize config
-  printf "network: token dimensions %d\n" $ dim config
+  printf "network: token dimensions %d\n" $ tokenDim config
   printf "prompt tokens: %s\n" $ show promptTokens
   printf "seed value %d, temperature %f\n" seedValue temperature
   putStrLn "<s>"

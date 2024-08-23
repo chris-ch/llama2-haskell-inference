@@ -39,8 +39,9 @@ common shared
     split >= 0.2.5 && < 0.3,
     optparse-applicative >= 0.18.1 && < 0.19,
     STMonadTrans >= 0.4.8 && < 0.5,
-    conduit,
-    conduit-extra
+    conduit >= 1.3.5 && < 1.4,
+    conduit-extra >= 1.3.6 && < 1.4,
+    primitive
   ghc-options:
     -Wall
     -Wcompat
@@ -51,7 +52,6 @@ common shared
     -Wmissing-home-modules
     -Wpartial-fields
     -Wredundant-constraints
-    -O2
     -threaded
     -haddock
   default-language: Haskell2010
@@ -61,6 +61,7 @@ library
   exposed-modules:
       Inference
       NetworkBuilder
+      Matrix
   hs-source-dirs:
       project/src
 
@@ -70,7 +71,7 @@ executable llama2
   hs-source-dirs:
       project/cli-app
   build-depends: optparse-applicative,
-    llama2
+      llama2
 
 test-suite project-test
   import: shared
