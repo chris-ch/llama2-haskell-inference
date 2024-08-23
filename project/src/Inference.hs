@@ -31,8 +31,6 @@ import Control.Monad.Reader
 import GHC.IO.Handle (Handle)
 import GHC.Unicode (isSpace)
 
-import Debug.Trace (trace)
-
 type TransformerResult a = ReaderT NetworkConfig (StateT AttentionKV IO) a
 
 softmax :: Vector Float -> Int -> Vector Float
