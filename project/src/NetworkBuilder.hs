@@ -87,7 +87,7 @@ readVectors nrows ncols = replicateM nrows (readVector ncols)
 readMatrix :: Int -> Int -> BG.Get (M.Matrix Float)
 readMatrix nrows ncols = do
   values <- readVector (nrows * ncols)
-  return $ M.fromVector nrows ncols values
+  return $ M.Matrix nrows ncols values
 
 readMatrices :: Int -> Int -> Int -> BG.Get [M.Matrix Float]
 readMatrices ndepth nrows ncols = replicateM ndepth (readMatrix nrows ncols)

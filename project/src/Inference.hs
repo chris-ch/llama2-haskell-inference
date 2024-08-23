@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Inference (run, computeQKV, rmsNorm, splitEvery,
+module Inference (run, computeQKV, rmsNorm,
 computeDeltaFFN, createLayerToken, multiheadActivation,
 buildActivation, applyRotations, transformer,
 softmax, drawSample
@@ -78,13 +78,6 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         value = headVector V.! headItemIndex
         valueNext = headVector V.! (headItemIndex + 1)
 
-splitEvery :: V.Unbox a => Int -> V.Vector a -> [V.Vector a]
-splitEvery n vec
-    | V.null vec = []
-    | otherwise = chunk : splitEvery n rest
-  where
-    (chunk, rest) = V.splitAt n vec
-
 dotProduct :: Vector Float -> Vector Float -> Float
 dotProduct vec1 vec2 = V.sum $ V.zipWith (*) vec1 vec2
 
@@ -121,13 +114,13 @@ computeQKV :: TransformerWeighting -> Int -> Int -> Int -> Vector Float -> Vecto
 computeQKV weights numHeads dimHead indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token (rmsAttWeight weights !! indexLayer)
-    wQ = M.multiplyVector (wq weights !! indexLayer) rba
-    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wQ)
-    wK = M.multiplyVector (wk weights !! indexLayer) rba
-    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wK)
+    wQ = M.Matrix numHeads dimHead $ M.multiplyVector (wq weights !! indexLayer) rba
+    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (M.getRowVectors wQ)
+    wK = M.Matrix numHeads dimHead $ M.multiplyVector (wk weights !! indexLayer) rba
+    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (M.getRowVectors wK)
     headsV = M.multiplyVector (wv weights !! indexLayer) rba
   in
-    (M.fromVectors numHeads dimHead headsQ, M.fromVectors numHeads dimHead headsK, M.fromVector numHeads dimHead headsV)
+    (M.fromVectors numHeads dimHead headsQ, M.fromVectors numHeads dimHead headsK, M.Matrix numHeads dimHead headsV)
 
 computeScores :: Int -> KeyCache -> Int -> Int -> M.Matrix Float -> Vector Float
 computeScores headDim kC indexLayer indexHead headsQ = V.fromList $ map calculateScore kC
