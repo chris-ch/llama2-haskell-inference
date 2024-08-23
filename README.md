@@ -23,6 +23,13 @@ Make sure flakes are enabled: add `experimental-features = nix-command flakes` t
 
 ```shell
 nix develop
+code .
+```
+
+Make sure HLS is set in `.vscode/settings.json` in order to get error messages in VSCode:
+
+```json
+{ "haskell.serverExecutablePath": "haskell-language-server" }
 ```
 
 ### Running llama2 using cabal

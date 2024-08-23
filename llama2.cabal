@@ -60,6 +60,7 @@ library
   exposed-modules:
       Inference
       NetworkBuilder
+      Matrix
   hs-source-dirs:
       project/src
 
