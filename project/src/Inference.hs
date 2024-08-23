@@ -65,7 +65,7 @@ drawSample seedValue probabilities = do
 
   return $ fromIntegral $ indexHighestCDF r probabilities
 
-buildActivation :: Int -> [Float] -> [Vector Float] -> Vector Float
+buildActivation :: Int -> Vector Float -> M.Matrix Float -> Vector Float
 buildActivation dimension headScores cacheLayerHead =
   DL.foldl' accumulate zeroVector zippedValues
   where
@@ -73,7 +73,7 @@ buildActivation dimension headScores cacheLayerHead =
     accumulate acc (valueVector, attentionWeight) = V.zipWith (+) acc (scale attentionWeight valueVector)
 
     zeroVector = V.replicate dimension 0.0
-    zippedValues = zip cacheLayerHead headScores
+    zippedValues = zip (M.getRowVectors cacheLayerHead) (V.toList headScores)
     scale w = V.map (w *)
 
 applyRotations :: Vector Float -> Vector Float -> Vector Float -> Vector Float
@@ -137,19 +137,26 @@ computeDeltaFFN weights indexLayer token =
     in
       M.multiplyVector weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
 
-computeQKV :: TransformerWeighting -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
-computeQKV weights numHeads indexLayer freqCisRealRow freqCisImagRow token =
+splitEvery :: V.Unbox a => Int -> V.Vector a -> [V.Vector a]
+splitEvery n vec
+    | V.null vec = []
+    | otherwise = chunk : splitEvery n rest
+  where
+    (chunk, rest) = V.splitAt n vec
+
+computeQKV :: TransformerWeighting -> Int -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> (M.Matrix Float, M.Matrix Float, M.Matrix Float)
+computeQKV weights numHeads dimHead indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token (rmsAttWeight weights !! indexLayer)
-    wQ = splitVector numHeads (M.multiplyVector (wq weights !! indexLayer) rba)
-    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wQ
-    wK = splitVector numHeads (M.multiplyVector (wk weights !! indexLayer) rba)
-    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
-    headsV = splitVector numHeads (M.multiplyVector (wv weights !! indexLayer) rba)
+    wQ = M.multiplyVector (wq weights !! indexLayer) rba
+    headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wQ)
+    wK = M.multiplyVector (wk weights !! indexLayer) rba
+    headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) (splitEvery dimHead wK)
+    headsV = M.Matrix numHeads dimHead $ M.multiplyVector (wv weights !! indexLayer) rba
   in
-    (headsQ, headsK, headsV)
+    (M.fromVectors numHeads dimHead headsQ, M.fromVectors numHeads dimHead headsK, headsV)
 
-multiheadActivation :: forall s.  Int -> Int -> Int -> Int -> [Vector Float] -> AttentionKV s -> TransformerStack s (M.Matrix Float)
+multiheadActivation :: forall s.  Int -> Int -> Int -> Int -> M.Matrix Float -> AttentionKV s -> TransformerStack s (M.Matrix Float)
 multiheadActivation indexToken numHeads headDim indexLayer headsQ sakv = do
 
   network <- ask
@@ -173,18 +180,18 @@ multiheadActivation indexToken numHeads headDim indexLayer headsQ sakv = do
       ) [0..indexToken]
 
     calculateScore :: Int -> Vector Float -> Float
-    calculateScore indexHead keyVector = dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDim)
+    calculateScore indexHead keyVector = dotProduct (M.getRowVector headsQ indexHead) keyVector / sqrt (fromIntegral headDim)
 
   activations <- mapM (\indexHead -> do
       (k :: [Vector Float]) <- lift $ kVectors' indexHead
       (v :: [Vector Float]) <- lift $ vVectors' indexHead
       let
-        scores :: Int -> [Float]
-        scores ixHead = V.toList $ softmax rawScores (indexToken + 1)
+        scores :: Int -> Vector Float
+        scores ixHead = softmax rawScores (indexToken + 1)
           where
             rawScores = V.generate (indexToken + 1) (\ixToken -> calculateScore ixHead (k !! ixToken))
 
-        activation = buildActivation headDim (scores indexHead) v
+        activation = buildActivation headDim (scores indexHead) (M.fromVectors numHeads numHeadComponents v)
       return activation
     ) [0 .. numHeads - 1]
   
@@ -198,17 +205,17 @@ createTokenVectorForLayer indexToken indexLayer freqCisRealRow freqCisImagRow to
     let sVC = sValueCache sakv :: AST.STUArray s (Int, Int, Int, Int) Float
 
     let
-      (headsQ, headsK, headsV) = computeQKV (weighting network) (numAttentionHeads network) indexLayer freqCisRealRow freqCisImagRow token
+      (headsQ, headsK, headsV) = computeQKV (weighting network) (numAttentionHeads network) (headDimension network) indexLayer freqCisRealRow freqCisImagRow token
 
-      headsQ :: [Vector Float]
-      headsK :: [Vector Float]
-      headsV :: [Vector Float]
+      headsQ :: M.Matrix Float
+      headsK :: M.Matrix Float
+      headsV :: M.Matrix Float
 
-    forM_ (zip [0..] headsK) $ \(i, headK) -> do
+    forM_ (zip [0..] (M.getRowVectors headsK)) $ \(i, headK) -> do
         forM_ [0..V.length headK - 1] $ \j -> do
             lift $ AST.writeArray sKC (indexToken, indexLayer, i, j) (headK V.! j)
 
-    forM_ (zip [0..] headsV) $ \(i, headV) -> do
+    forM_ (zip [0..] (M.getRowVectors headsV)) $ \(i, headV) -> do
         forM_ [0..V.length headV - 1] $ \j -> do
             lift $ AST.writeArray sVC (indexToken, indexLayer, i, j) (headV V.! j)
 
