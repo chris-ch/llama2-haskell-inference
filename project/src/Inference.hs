@@ -15,7 +15,7 @@ import qualified Data.Vector.Unboxed as V
 import qualified Matrix as M
 
 import NetworkBuilder (NetworkConfig(..), AttentionKV(..),
-  Matrix', TransformerWeighting(..), KeyCache, ValueCache, Vocabulary, PromptTokens, Token,
+  TransformerWeighting(..), KeyCache, ValueCache, Vocabulary, PromptTokens, Token,
   initModel, tokenizerInit)
 import Control.Monad.State ( StateT, evalStateT, MonadState(put), gets )
 import System.IO (hFlush, stdout)
@@ -30,8 +30,6 @@ import Control.Monad.Reader
       MonadReader(ask) )
 import GHC.IO.Handle (Handle)
 import GHC.Unicode (isSpace)
-
-import Debug.Trace (trace)
 
 type TransformerResult a = ReaderT NetworkConfig (StateT AttentionKV IO) a
 
@@ -59,15 +57,15 @@ drawSample seedValue probabilities = do
   return $ fromIntegral $ indexHighestCDF r probabilities
 
 -- Returns an array of size (headDim)
-buildActivation :: Int -> Int -> ValueCache -> Int -> [Float] -> [Float]
+buildActivation :: Int -> Int -> ValueCache -> Int -> [Float] -> Vector Float
 buildActivation headDim indexLayer vC indexHead headScores =
   DL.foldl' accumulate zeroVector zippedValues
   where
-    accumulate :: [Float] -> ([Float], Float) -> [Float]
-    accumulate acc (valueVector, attentionWeight) = zipWith (+) acc (scale attentionWeight valueVector)
-    zeroVector = replicate headDim 0.0
-    zippedValues = zip (map (\count -> M.getRow (vC !! count !! indexLayer) indexHead) [0..]) headScores
-    scale w = map (w *)
+    accumulate :: Vector Float -> (Vector Float, Float) -> Vector Float
+    accumulate acc (valueVector, attentionWeight) = V.zipWith (+) acc (scale attentionWeight valueVector)
+    zeroVector = V.replicate headDim 0.0
+    zippedValues = zip (map (\count -> M.getRowVector (vC !! count !! indexLayer) indexHead) [0..]) headScores
+    scale w = V.map (w *)
 
 applyRotations :: Vector Float -> Vector Float -> Vector Float -> Vector Float
 applyRotations headVector freqCisRealRow freqCisImagRow =
@@ -80,9 +78,6 @@ applyRotations headVector freqCisRealRow freqCisImagRow =
         imag = freqCisImagRow V.! (headItemIndex `div` 2)
         value = headVector V.! headItemIndex
         valueNext = headVector V.! (headItemIndex + 1)
-
-matrixVectorMult :: Matrix' Float -> Vector Float -> Vector Float
-matrixVectorMult mat vec = V.fromList $ map (`dotProduct` vec) mat
 
 splitVector :: Int -> Vector Float -> [Vector Float]
 splitVector m vec = V.fromList <$> DLS.chunksOf (V.length vec `div` m) (V.toList vec)
@@ -114,20 +109,20 @@ computeDeltaFFN weights indexLayer token =
       weight2 = w2 weights !! indexLayer
       weight3 = w3 weights !! indexLayer
       rba = rmsNorm token rmsFFNWeight
-      hiddenDimensionBuffer1 = matrixVectorMult weight1 rba
-      hiddenDimensionBuffer2 = matrixVectorMult weight3 rba
+      hiddenDimensionBuffer1 = M.multiplyVector weight1 rba
+      hiddenDimensionBuffer2 = M.multiplyVector weight3 rba
       sigmoided = V.map sigmoidLinearUnit hiddenDimensionBuffer1
-    in matrixVectorMult weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
+    in M.multiplyVector weight2 (V.zipWith (*) sigmoided hiddenDimensionBuffer2)
 
 computeQKV :: TransformerWeighting -> Int -> Int -> Vector Float -> Vector Float -> Vector Float -> ([Vector Float], [Vector Float], [Vector Float])
 computeQKV weights numHeads indexLayer freqCisRealRow freqCisImagRow token =
   let
     rba = rmsNorm token (rmsAttWeight weights !! indexLayer)
-    wQ = splitVector numHeads (matrixVectorMult (wq weights !! indexLayer) rba)
+    wQ = splitVector numHeads (M.multiplyVector (wq weights !! indexLayer) rba)
     headsQ = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wQ
-    wK = splitVector numHeads (matrixVectorMult (wk weights !! indexLayer) rba)
+    wK = splitVector numHeads (M.multiplyVector (wk weights !! indexLayer) rba)
     headsK = map (\vector -> applyRotations vector freqCisRealRow freqCisImagRow) wK
-    headsV = splitVector numHeads (matrixVectorMult (wv weights !! indexLayer) rba)
+    headsV = splitVector numHeads (M.multiplyVector (wv weights !! indexLayer) rba)
   in
     (headsQ, headsK, headsV)
 
@@ -136,16 +131,15 @@ computeScores headDim kC indexLayer indexHead headsQ = V.fromList $ map calculat
   where
     calculateScore :: [M.Matrix Float] -> Float
     calculateScore keyVectors =
-      let keyVector = M.getRow (keyVectors !! indexLayer) indexHead
-      in dotProduct (headsQ !! indexHead) (V.fromList keyVector) / sqrt (fromIntegral headDim)
+      let keyVector = M.getRowVector (keyVectors !! indexLayer) indexHead
+      in dotProduct (headsQ !! indexHead) keyVector / sqrt (fromIntegral headDim)
 
-multiheadActivation :: Int -> Int -> Int -> KeyCache -> ValueCache -> [Vector Float] -> Matrix' Float
+multiheadActivation :: Int -> Int -> Int -> KeyCache -> ValueCache -> [Vector Float] -> M.Matrix Float
 multiheadActivation numHeads headDim indexLayer kC vC headsQ =
-    [V.fromList $ activation indexHead | indexHead <- [0 .. numHeads - 1]]
+    M.fromVectors numHeads headDim [activation indexHead | indexHead <- [0 .. numHeads - 1]]
     where
-      activation :: Int -> [Float]
-      activation indexHead = buildActivation headDim indexLayer vC indexHead (scores indexHead)
-      scores indexHead = V.toList $ softmax rawScores (V.length rawScores)
+      activation indexHead = buildActivation headDim indexLayer vC indexHead (V.toList $ scores indexHead)
+      scores indexHead = softmax rawScores (V.length rawScores)
         where
           rawScores = computeScores headDim kC indexLayer indexHead headsQ
 
@@ -161,7 +155,7 @@ createLayerToken stepCount indexLayer freqCisRealRow freqCisImagRow token = do
         valueCache' = take stepCount vC ++ [valueCacheStep]
         activations = multiheadActivation (numAttentionHeads network) (headDimension network) indexLayer keyCache' valueCache' headsQ
         wO = wo (weighting network)
-        deltaTokenQKV = matrixVectorMult (wO !! indexLayer) (V.concat activations)
+        deltaTokenQKV = M.multiplyVector (wO !! indexLayer) (M.values activations)
         token' = V.zipWith (+) token deltaTokenQKV
         deltaTokenFFN = computeDeltaFFN (weighting network) indexLayer token'
         result = V.zipWith (+) token' deltaTokenFFN
@@ -173,7 +167,7 @@ transformer tokenCode stepCount = do
     network <- ask
 
     -- Getting the token embedding
-    let token = tokenEmbeddingTable (weighting network) !! fromIntegral tokenCode
+    let token = M.getRowVector (tokenEmbeddingTable (weighting network)) (fromIntegral tokenCode)
 
     -- Plucking out the current row of freq_cis_real and freq_cis_imag
     let freqCisRealRow = freqCisReal (weighting network) !! stepCount
@@ -188,7 +182,7 @@ transformer tokenCode stepCount = do
     let tokenWithRms = rmsNorm finalToken (rmsFinalWeight $ weighting network)
 
     -- Classifier into logits
-    let logits = matrixVectorMult (tokenEmbeddingTable (weighting network)) tokenWithRms
+    let logits = M.multiplyVector (tokenEmbeddingTable (weighting network)) tokenWithRms
 
     return logits
 
