@@ -1,6 +1,6 @@
 # llama2-haskell-inference
 
-Haskell version of llama2.c
+Haskell version of llama2.c **(Deprecated, please see: https://github.com/chris-ch/llama2.hs)**
 
 ## Pre-requisites
 
